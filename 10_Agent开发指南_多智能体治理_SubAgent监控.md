@@ -16,23 +16,23 @@
 
 在传统软件中，代码逻辑是确定的，调用链路往往是静态的（A -> B -> C）。而在 Agent 系统中，Sub-Agent 的调用链路是由 LLM 动态生成的。
 
-* **场景举例**：Planner 可能根据任务难度决定调用"代码解释器"还是"搜索引擎"，甚至可能在运行中发现错误而自我修正计划。
+- **场景举例**：Planner 可能根据任务难度决定调用"代码解释器"还是"搜索引擎"，甚至可能在运行中发现错误而自我修正计划。
 
-* **运维痛点**：这种**动态拓扑结构**使得传统的 APM（应用性能监控）难以追踪完整的执行路径，因为下一次执行的路径可能完全不同。
+- **运维痛点**：这种**动态拓扑结构**使得传统的 APM（应用性能监控）难以追踪完整的执行路径，因为下一次执行的路径可能完全不同。
 
 ### 2. 逻辑级联故障
 
 Sub-Agent 之间存在依赖关系，但不同于微服务的网络依赖，Agent 间依赖的是"语义"与"格式"。
 
-* **场景举例**：一个"数据分析师 Agent"依赖"数据清洗 Agent"的输出。如果后者输出的 JSON 缺失字段，前者可能会反复重试，甚至陷入两个 Agent 互相推诿的"死循环"（例如：A 说格式不对，B 修正后 A 仍说不对）。
+- **场景举例**：一个"数据分析师 Agent"依赖"数据清洗 Agent"的输出。如果后者输出的 JSON 缺失字段，前者可能会反复重试，甚至陷入两个 Agent 互相推诿的"死循环"（例如：A 说格式不对，B 修正后 A 仍说不对）。
 
-* **运维痛点**：这种"逻辑层面的雪崩"比网络层面的雪崩更难检测，系统负载可能不高，但 Token 消耗却在指数级上升。
+- **运维痛点**：这种"逻辑层面的雪崩"比网络层面的雪崩更难检测，系统负载可能不高，但 Token 消耗却在指数级上升。
 
 ### 3. 成本黑箱
 
 一个复杂的任务可能分解为 50 个子任务，每个子任务消耗的 Token 数量不同。
 
-* **运维痛点**：缺乏细粒度的监控会导致一次简单的查询消耗掉昂贵的 Token 额度，而运维人员直到收到账单那一刻才知晓。我们需要知道是**哪个 Agent、哪个步骤、为了什么意图**消耗了资源。
+- **运维痛点**：缺乏细粒度的监控会导致一次简单的查询消耗掉昂贵的 Token 额度，而运维人员直到收到账单那一刻才知晓。我们需要知道是**哪个 Agent、哪个步骤、为了什么意图**消耗了资源。
 
 ---
 
@@ -46,25 +46,25 @@ Sub-Agent 之间存在依赖关系，但不同于微服务的网络依赖，Agen
 
 **设计原则：**
 
-* **Input/Output Schema**：强制所有 Sub-Agent 输出结构化的 JSON 日志，包含 `thought_process`（推理过程）、`tool_calls`（工具调用意图）和 `final_answer`（最终答案）。
+- **Input/Output Schema**：强制所有 Sub-Agent 输出结构化的 JSON 日志，包含 `thought_process`（推理过程）、`tool_calls`（工具调用意图）和 `final_answer`（最终答案）。
 
-* **ReAct 模式追踪**：记录 Agent 在 Thought（思考）-> Action（行动）-> Observation（观察）循环中的每一次状态变更。
+- **ReAct 模式追踪**：记录 Agent 在 Thought（思考）-> Action（行动）-> Observation（观察）循环中的每一次状态变更。
 
 ### 10.2.2 细粒度指标
 
 我们需要定义一组新的多维指标体系，用于量化 Agent 的"智力水平"与"效率"。
 
-* **Agent 级别**：
+- **Agent 级别**：
 
-  * **自主轮次**：单个 Sub-Agent 为了完成任务进行了多少轮自我迭代？过高的轮次通常意味着 Prompt 设计缺陷或模型能力不足。
+  - **自主轮次**：单个 Sub-Agent 为了完成任务进行了多少轮自我迭代？过高的轮次通常意味着 Prompt 设计缺陷或模型能力不足。
 
-  * **工具调用成功率**：每个 Sub-Agent 调用外部工具的成功比率。
+  - **工具调用成功率**：每个 Sub-Agent 调用外部工具的成功比率。
 
-* **系统级别**：
+- **系统级别**：
 
-  * **端到端延迟**：从用户请求到最终响应的时间。
+  - **端到端延迟**：从用户请求到最终响应的时间。
 
-  * **成本效益比**：完成单个任务的平均美元成本。
+  - **成本效益比**：完成单个任务的平均美元成本。
 
 ### 10.2.3 分布式追踪：可视化 Agent 拓扑
 
@@ -72,11 +72,11 @@ Sub-Agent 之间存在依赖关系，但不同于微服务的网络依赖，Agen
 
 **核心概念映射：**
 
-* **Trace**：代表一个完整的用户任务。例如："分析上季度销售数据"。
+- **Trace**：代表一个完整的用户任务。例如："分析上季度销售数据"。
 
-* **Span**：代表一个 Sub-Agent 的具体执行步骤。例如："SQL生成Agent执行查询"。
+- **Span**：代表一个 Sub-Agent 的具体执行步骤。例如："SQL生成Agent执行查询"。
 
-* **Parent Span**：Supervisor Agent 将任务分发给 Sub-Agent 时，建立父子关系。
+- **Parent Span**：Supervisor Agent 将任务分发给 Sub-Agent 时，建立父子关系。
 
 **流程图：多智能体调用链路追踪示意图**
 
@@ -89,23 +89,22 @@ sequenceDiagram
     participant Trace System
     User->>Supervisor Agent: 提交任务
     Note right of Supervisor Agent: 生成 Root Trace ID: T1001
-    
+
     Supervisor Agent->>Trace System: Start Span (Planner)
     Supervisor Agent->>Search Agent: 委派搜索任务
     Note right of Search Agent: 生成 Child Span ID: S1002<br/>Parent: T1001
-    
+
     Search Agent->>Trace System: End Span (Search Success)
     Search Agent-->>Supervisor Agent: 返回搜索结果
-    
+
     Supervisor Agent->>Code Agent: 委派分析任务
     Note right of Code Agent: 生成 Child Span ID: S1003<br/>Parent: T1001
-    
+
     Code Agent->>Trace System: End Span (Code Error)
     Code Agent-->>Supervisor Agent: 返回错误信息
-    
+
     Supervisor Agent->>Trace System: End Span (Root)
     Supervisor Agent-->>User: 最终响应
-
 ```
 
 ---
@@ -124,25 +123,24 @@ sequenceDiagram
 graph TD
     User[用户请求] --> API_Gateway[API 网关]
     API_Gateway --> Supervisor[Supervisor Agent]
-    
+
     subgraph "治理层 Governance Layer"
         Middleware[AgentOps 中间件]
         Policy[策略执行器: 熔断/限流/预算]
         Observer[可观测性服务: Trace/Metrics/Logs]
     end
-    
+
     Supervisor -->|调用| Middleware
     Middleware -->|拦截与增强| SubAgentA[Sub-Agent A]
     Middleware -->|拦截与增强| SubAgentB[Sub-Agent B]
-    
+
     SubAgentA -->|工具调用| Tools[外部工具]
-    
+
     Middleware -->|上报数据| Observer
     Middleware -->|检查配额| Policy
-    
+
     Observer -->|可视化| Dashboard[监控大屏]
     Policy -->|触发熔断| Middleware
-
 ```
 
 ### 10.3.2 核心组件详解
@@ -151,11 +149,11 @@ graph TD
 
 2. **策略执行器**：负责运行时治理。包含：
 
-   * **Rate Limiter**：限制单个 Agent 的并发数，防止雪崩。
+   - **Rate Limiter**：限制单个 Agent 的并发数，防止雪崩。
 
-   * **Budget Controller**：实时扣减 Token 配额，超额即停。
+   - **Budget Controller**：实时扣减 Token 配额，超额即停。
 
-   * **Circuit Breaker**：当某个工具连续失败 N 次，暂时屏蔽该工具。
+   - **Circuit Breaker**：当某个工具连续失败 N 次，暂时屏蔽该工具。
 
 ---
 
@@ -165,11 +163,11 @@ graph TD
 
 ### 10.4.1 设计内容
 
-* **目标**：为任意 Agent 函数增加监控能力，无需修改 Agent 内部代码。
+- **目标**：为任意 Agent 函数增加监控能力，无需修改 Agent 内部代码。
 
-* **技术栈**：Python 标准库 + 一个模拟的 Agent 类。
+- **技术栈**：Python 标准库 + 一个模拟的 Agent 类。
 
-* **核心功能**：
+- **核心功能**：
 
   1. 自动生成 Trace ID 和 Span ID。
 
@@ -398,7 +396,6 @@ graph TD
     I --> H
     G --> J[Report Error to Supervisor]
     C --> J
-
 ```
 
 **完整实现代码**：
@@ -1234,19 +1231,19 @@ demo_cost_attribution()
 
 **传统软件测试的特点：**
 
-* **确定性**：相同输入必然得到相同输出
+- **确定性**：相同输入必然得到相同输出
 
-* **可预测**：逻辑路径可通过代码分析覆盖
+- **可预测**：逻辑路径可通过代码分析覆盖
 
-* **易 Mock**：外部依赖可轻松模拟
+- **易 Mock**：外部依赖可轻松模拟
 
 **Agent 测试的挑战：**
 
-* **非确定性**：LLM 的输出具有随机性
+- **非确定性**：LLM 的输出具有随机性
 
-* **难预测**：相同 Prompt 可能触发不同的推理路径
+- **难预测**：相同 Prompt 可能触发不同的推理路径
 
-* **难 Mock**：模型行为难以完全模拟
+- **难 Mock**：模型行为难以完全模拟
 
 #### Agent 测试金字塔
 
@@ -1489,25 +1486,25 @@ class TestWeatherTool:
 
 **适合用 TDD 的场景**
 
-* 工具函数（Tool）的实现：输入输出明确，最适合 TDD
+- 工具函数（Tool）的实现：输入输出明确，最适合 TDD
 
-* 数据转换和格式化逻辑
+- 数据转换和格式化逻辑
 
-* 业务规则的验证逻辑（折扣、权限、流程）
+- 业务规则的验证逻辑（折扣、权限、流程）
 
 **需要调整的场景**
 
-* LLM 调用的测试：输出不确定，需要 Mock 或放宽断言（见下文单元测试章节）
+- LLM 调用的测试：输出不确定，需要 Mock 或放宽断言（见下文单元测试章节）
 
-* 端到端的 Agent 行为：适合集成测试而非 TDD
+- 端到端的 Agent 行为：适合集成测试而非 TDD
 
 **常见误区**
 
-* 让 Agent 同时写测试和实现：失去了 TDD 的防护效果，Agent 会倾向写"能通过自己测试的代码"
+- 让 Agent 同时写测试和实现：失去了 TDD 的防护效果，Agent 会倾向写"能通过自己测试的代码"
 
-* 跳过"确认红色"步骤：可能测试本身就是错的
+- 跳过"确认红色"步骤：可能测试本身就是错的
 
-* 测试太宽泛（`assert result is not None`）：无法真正验证行为
+- 测试太宽泛（`assert result is not None`）：无法真正验证行为
 
 **小结**
 
@@ -2969,63 +2966,63 @@ if __name__ == "__main__":
 
 1. **测试思维的转变**
 
-   * Agent 测试 ≠ 传统软件测试
+   - Agent 测试 ≠ 传统软件测试
 
-   * 需要接受非确定性，但控制其范围
+   - 需要接受非确定性，但控制其范围
 
-   * 效果评估比功能测试更重要
+   - 效果评估比功能测试更重要
 
 2. **四层测试体系**
 
-   * **红/绿 TDD**：先写测试再让 Agent 实现，确保代码真正可运行
+   - **红/绿 TDD**：先写测试再让 Agent 实现，确保代码真正可运行
 
-   * **单元测试**：Mock LLM 响应，测试工具和逻辑
+   - **单元测试**：Mock LLM 响应，测试工具和逻辑
 
-   * **集成测试**：端到端流程验证
+   - **集成测试**：端到端流程验证
 
-   * **效果评估**：准确率、满意度、性能指标
+   - **效果评估**：准确率、满意度、性能指标
 
 3. **评估维度**
 
-   * Exact Match / F1 Score / Semantic Similarity
+   - Exact Match / F1 Score / Semantic Similarity
 
-   * LLM-as-Judge（用强模型评估弱模型）
+   - LLM-as-Judge（用强模型评估弱模型）
 
-   * 用户满意度调研
+   - 用户满意度调研
 
 4. **上线保障**
 
-   * A/B 测试框架
+   - A/B 测试框架
 
-   * 灰度发布策略
+   - 灰度发布策略
 
-   * 持续监控与告警
+   - 持续监控与告警
 
 #### 最佳实践
 
 1. **测试数据集管理**
 
-   * 建立标准化的测试用例库
+   - 建立标准化的测试用例库
 
-   * 定期更新边界 case
+   - 定期更新边界 case
 
-   * 记录每次回归测试的结果
+   - 记录每次回归测试的结果
 
 2. **自动化流水线**
 
-   * GitHub Actions 自动运行测试
+   - GitHub Actions 自动运行测试
 
-   * 覆盖率报告自动生成
+   - 覆盖率报告自动生成
 
-   * 性能基准对比
+   - 性能基准对比
 
 3. **生产监控**
 
-   * 定期健康检查（15 分钟一次）
+   - 定期健康检查（15 分钟一次）
 
-   * 关键指标告警（准确率、延迟、错误率）
+   - 关键指标告警（准确率、延迟、错误率）
 
-   * 问题自动记录与追踪
+   - 问题自动记录与追踪
 
 ---
 

@@ -1,4 +1,4 @@
-# 第十二章 生态工具——主流 Agent 框架和产品
+# 第十二章 生态工具——主流Agent框架和产品
 
 本章纵览主流代码级Agent框架：LangChain的LCEL与Runnable协议、LangGraph的状态机与循环控制、LlamaIndex的RAG数据处理、CrewAI与AutoGen的多Agent协作。提供框架选型决策表与未来趋势分析，帮助开发者根据场景需求选择最合适的工具。
 
@@ -43,13 +43,11 @@ graph LR
     B --> C[LLM 模型]
     C --> D[输出解析器]
     D --> E[结果: joke]
-
 ```
 
 **【代码示例】**
 
 ```python
-
 # 安装依赖: pip install langchain langchain-openai
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_openai import ChatOpenAI
@@ -75,7 +73,6 @@ try:
     print(f"生成的笑话: {result}")
 except Exception as e:
     print(f"调用失败: {e}")
-
 ```
 
 ### 12.2.3 局限性分析
@@ -110,7 +107,6 @@ graph TD
     Condition -- 是 --> Tools[工具节点: 执行操作]
     Tools --> Agent
     Condition -- 否 --> End((结束: 输出答案))
-
 ```
 
 **【代码示例】**
@@ -176,7 +172,6 @@ workflow.add_edge("tools", "agent")
 app = workflow.compile()
 
 # app.invoke({"messages": ["用户问题"]})
-
 ```
 
 ### 12.3.3 关键特性
@@ -215,7 +210,6 @@ graph TD
     H --> I[构建上下文 Prompt]
     I --> J[LLM 生成回答]
     end
-
 ```
 **【核心组件代码示例】**
 
@@ -240,15 +234,15 @@ query_engine = index.as_query_engine()
 # 4. 执行查询
 response = query_engine.query("这篇文档主要讲了什么？")
 print(response)
-
 ```
 
 ### 12.4.3 框架协作
-LlamaIndex 与 LangChain 并非竞争关系。
 
-- **LlamaIndex** 负责"记忆力"。
-- **LangChain/LangGraph** 负责"逻辑与行动"。
-- **最佳实践**：将 LlamaIndex 封装为一个 `RetrieverTool`，集成到 LangGraph 的 Agent 流程中。
+LlamaIndex 与 LangChain 并非竞争关系：
+
+- **LlamaIndex** 负责"记忆力"
+- **LangChain/LangGraph** 负责"逻辑与行动"
+- **最佳实践**：将 LlamaIndex 封装为一个 `RetrieverTool`，集成到 LangGraph 的 Agent 流程中
 
 ## 12.5 多 Agent 协作框架
 面对复杂任务，单个 Agent 往往受限于 Prompt 的复杂度或上下文窗口，多 Agent 协作通过"分而治之"解决了这一难题。
@@ -312,7 +306,9 @@ result = my_crew.kickoff()
 ```
 
 ## 12.6 框架选型指南与趋势
+
 面对众多框架，开发者往往陷入选择困难。以下是基于实战经验的选型决策表：
+
 | 场景需求 | 推荐框架 | 核心理由 |
 | :--- | :--- | :--- |
 | **入门学习 / 简单 Demo** | **LangChain (LCEL)** | 文档丰富，社区庞大，能快速跑通线性流程。 |
@@ -349,24 +345,18 @@ result = my_crew.kickoff()
 【团队因素】
 □ 团队是否有人熟悉该框架？（0分=无人熟悉，需要从头学）
 □ 框架的 README 和文档，1小时内能否跑通 Hello World？
-
 □ StackOverflow/GitHub Issues 里能否找到你遇到的问题？
 
 【项目因素】
 □ 项目是线性流程（→ LangChain LCEL）还是有循环/条件（→ LangGraph）？
-
 □ 是否重度依赖 RAG 和知识库（→ LlamaIndex）？
-
 □ 是否需要多个 Agent 协作（→ CrewAI / AutoGen）？
-
 □ 是否需要代码自动执行（→ AutoGen）？
 
 【风险因素】
 □ 框架的最近一次 commit 是什么时候？（超过 6 个月未更新要警惕）
 □ 是否有公司在生产环境使用案例？
-
 □ 破坏性更新频率如何？（LangChain 早期版本臭名昭著）
-
 ```
 
 **实战建议**：选框架不是选最强的，而是选最适合当前阶段的。我们团队第一个项目用 LangChain 起步（文档多、例子多），后来随着业务复杂度上升，逐步迁移了状态管理复杂的部分到 LangGraph。不要一开始就追求完美架构。
@@ -379,16 +369,12 @@ result = my_crew.kickoff()
 **一个实用的判断框架**：
 
 ```python
-
 # 伪代码：评估是否值得自研
 def should_self_build(feature: str, framework_support: str) -> str:
     """
     决策逻辑：
-
     - 框架完全支持 + 不影响性能 → 直接用框架
-
     - 框架支持但有性能损耗 → 框架+自定义优化
-
     - 框架不支持 → 评估复杂度后决定
     """
     
@@ -402,7 +388,6 @@ def should_self_build(feature: str, framework_support: str) -> str:
     # 场景三：框架不支持的特殊需求（例：基于业务规则的动态路由）
     # 结论：在框架的扩展点上自研，而不是绕过框架
     pass
-
 ```
 
 **一个真实的决策案例**：
@@ -449,9 +434,7 @@ LangChain 从 0.x 升到 1.x，一堆 DeprecationWarning；从 1.x 升到 2.x，
 **解决思路与方案：**
 
 ```python
-
 # 1. 用抽象层隔离框架依赖（最重要！）
-
 # 不要在业务代码里直接 import langchain，全部通过接口层
 
 # ✗ 错误做法：框架 import 散落在业务代码各处
@@ -483,17 +466,12 @@ class LLMAdapter:
         return response.content
 
 # 2. 版本锁定文件（requirements.txt 锁定到 Minor 版本）
-
 # langchain==0.3.7          ← 锁定，不用 >=
-
 # langchain-openai==0.2.5   ← 同理
 
 # 3. 升级时先跑覆盖率测试
-
 # pytest tests/ -v --tb=short > upgrade_test_report.txt
-
 # 重点关注 LLM 调用、Chain 执行、Memory 读写这三个核心路径
-
 ```
 
 > **实战建议**：如果你的项目已经在生产环境，LangChain 版本就**锁死别动**，直到有明确的业务需求必须升级。"用新版本"本身不是理由。我见过有团队因为升级 LangChain 把半个月的工期搭进去的，最后新版本也没带来什么实质收益。
