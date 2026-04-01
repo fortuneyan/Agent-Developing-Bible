@@ -1,16 +1,24 @@
 # 第五章：技能体系——Agent Skills 定义和组织
 
 本章讲解如何将原子性的Function封装为高层次的Skill，包括Skill的结构化定义（元数据、输入输出契约、核心组件配置）、技能注册与发现机制（集中式注册表、动态技能发现、语义匹配），以及技能执行与编排的生命周期管理，并提供智能数据分析Skill的实战案例。
+
 ## 5.1 引言：从工具人到专家
 在上一章中，我们探讨了 Function Calling，它赋予了 Agent 操作外部世界的能力。然而，仅仅拥有“锤子”和“锯子”（Functions）并不能让人成为“木匠”。在实际应用中，我们需要 Agent 扮演具体的角色，完成复杂的业务流程，这就是“技能”的概念。
 **Skill 是比 Function 更高维度的抽象**。如果说 Function 是 Agent 的“原子能力”，那么 Skill 就是 Agent 的“业务解决方案”。一个 Skill 可能包含特定的 Prompt 策略、一系列有序或动态的工具调用，以及专用的知识库资源。
+
 ### 为什么需要技能层？
+
 在真实业务场景中，我们发现单纯使用 Function Calling 会遇到以下问题：
+
 1. **认知负荷过重**：LLM 需要在成百上千个工具中选择，容易产生“选择困难症”
+
 2. **业务逻辑分散**：相同的业务流程（如生成报表）需要在多个地方重复实现
+
 3. **缺乏上下文**：工具调用之间缺乏统一的业务上下文和状态管理
+
 4. **难以维护**：当业务逻辑变化时，需要修改多个调用点
 技能层通过**封装**、**抽象**和**复用**解决了这些问题。
+
 ## 5.2 Skill 与 Function 的核心区别
 理解两者的差异有助于我们构建清晰的架构：
 | 维度 | Function (工具) | Skill (技能) |
@@ -22,15 +30,21 @@
 | **逻辑** | 无状态，单纯执行 | 包含推理逻辑、流程控制和状态管理 |
 | **Prompt** | 通用 System Prompt | 包含技能专用的 System Prompt 模板 |
 | **生命周期** | 瞬时执行 | 可能包含多轮交互和持久化状态 |
+
 ### 类比理解
 把 Agent 想象成一个公司：
+
 - **Function**：是公司的“基础工具”，如电话、打印机、计算器
+
 - **Skill**：是公司的“专业部门”，如财务部、研发部、市场部
 财务部（Skill）会使用计算器、打印机（Functions），但它还包含了一套完整的财务处理流程、专业知识和业务规则。
+
 ## 5.3 Skill 的结构化定义
 为了实现大规模技能管理，我们需要定义一套标准的 Skill Schema。一个成熟的 Skill 定义应包含以下部分：
+
 ### 5.3.1 元数据设计
 元数据是 Agent 决定“何时使用该技能”的依据。
+
 ```json
 {
   "name": "financial_report_generator",
@@ -45,14 +59,21 @@
   "rating": 4.5,
   "usage_count": 1250
 }
+
 ```
 **设计要点**：
+
 - `name`：用于系统内部调用的唯一标识符
+
 - `display_name`：面向用户展示的友好名称
+
 - `description`：详细的功能描述，用于语义检索和 LLM 决策
+
 - `tags`：多维度标签，便于分类和筛选
+
 ### 5.3.2 输入输出契约
 明确技能的接口规范，确保调用方传入正确的参数。
+
 ```json
 {
   "input_schema": {
@@ -100,8 +121,11 @@
     }
   }
 }
+
 ```
+
 ### 5.3.3 核心组件配置
+
 ```json
 {
   "system_prompt_template": "你是一名专业的财务分析师，专注于为{{company_name}}生成{{report_type}}财务报告。\n\n当前会计期间：{{fiscal_period.start_date}} 至 {{fiscal_period.end_date}}\n\n请按照以下流程工作：\n1. 从财务数据库获取原始数据\n2. 进行数据清洗和验证\n3. 计算关键财务指标\n4. 生成结构化报告\n5. 提供财务分析建议\n\n注意事项：\n- 确保数据准确性\n- 所有金额单位统一为万元\n- 比较去年同期数据",
@@ -151,10 +175,14 @@
     }
   ]
 }
+
 ```
+
 ## 5.4 技能注册与发现机制
 随着技能数量的增长，Agent 不可能在每次请求时都加载所有技能的描述。我们需要构建类似“App Store”的机制。
+
 ### 5.4.1 集中式技能注册表架构
+
 ```mermaid
 graph TB
     subgraph "Skill Registry"
@@ -183,13 +211,20 @@ graph TB
         O[技能发现服务] --> A
         P[权限管理服务] --> A
     end
+
 ```
 **核心功能**：
+
 1. **技能注册**：验证技能定义的完整性和合规性
+
 2. **版本管理**：支持多版本共存和灰度发布
+
 3. **依赖解析**：自动检查工具和知识库的可用性
+
 4. **热插拔**：新增技能无需重启 Agent 服务
+
 ### 5.4.2 动态技能发现流程
+
 ```mermaid
 sequenceDiagram
     participant U as 用户
@@ -221,8 +256,10 @@ sequenceDiagram
     A->>A: 加载技能配置和依赖
     A->>A: 执行技能逻辑
     A-->>U: 返回执行结果
+
 ```
 **技术实现细节**：
+
 ```python
 class SkillDiscovery:
     def __init__(self, vector_store, skill_registry):
@@ -263,9 +300,12 @@ class SkillDiscovery:
             filters.append({"capabilities": {"$all": context["required_capabilities"]}})
         
         return await self.skill_registry.query(filters)
+
 ```
+
 ### 5.4.3 基于语义的技能匹配
 我们将技能的描述和标签向量化，构建语义索引：
+
 ```python
 class SkillIndexer:
     def __init__(self, embedding_model):
@@ -292,10 +332,14 @@ class SkillIndexer:
             desc = f"{name}({prop.get('type', 'any')}): {prop.get('description', '')}"
             descriptions.append(desc)
         return "; ".join(descriptions)
+
 ```
+
 ## 5.5 技能执行与编排
 当 LLM 决定调用某个 Skill 时，执行框架需要进行一系列编排工作。
+
 ### 5.5.1 技能执行生命周期
+
 ```mermaid
 stateDiagram-v2
     [*] --> 初始化
@@ -313,8 +357,11 @@ stateDiagram-v2
     成功 --> 资源清理: 保存状态
     失败 --> 资源清理: 回滚操作
     资源清理 --> [*]
+
 ```
+
 ### 5.5.2 执行引擎设计
+
 ```python
 class SkillExecutor:
     def __init__(self, tool_registry, knowledge_base_manager, permission_manager):
@@ -373,9 +420,12 @@ class SkillExecutor:
             env["knowledge_bases"][kb_config["id"]] = kb
         
         return env
+
 ```
+
 ### 5.5.3 并发与隔离策略
 在多技能并发执行场景下，我们需要确保资源隔离和状态一致性：
+
 ```python
 class SkillSandbox:
     """技能执行沙箱环境"""
@@ -411,17 +461,80 @@ class SkillSandbox:
             await self._persist_state()
         else:
             await self._rollback_state()
+    
+    async def _create_state_store(self) -> dict:
+        """创建沙箱的状态存储，用于在技能执行过程中保存中间状态"""
+        # 为每个技能实例创建独立的状态字典
+        # 生产环境中可替换为 Redis 或 SQLite 等持久化存储
+        state = {
+            "skill_id": self.skill_id,
+            "status": "initialized",
+            "created_at": time.time(),
+            "intermediate_results": {},
+            "step_index": 0,
+        }
+        return state
+    
+    async def _cleanup_temp_resources(self):
+        """清理沙箱执行过程中产生的临时资源"""
+        if self.state_store is None:
+            return
+        
+        # 清理中间结果中的临时文件和缓存
+        for key, value in self.state_store.get("intermediate_results", {}).items():
+            # 如果中间结果是文件路径，删除临时文件
+            if isinstance(value, str) and value.startswith("/tmp/"):
+                try:
+                    import os
+                    if os.path.exists(value):
+                        os.remove(value)
+                except OSError as e:
+                    logger.warning(f"清理临时文件失败: {value}, 错误: {e}")
+        
+        # 重置状态
+        self.state_store.clear()
+        self.state_store = None
+    
+    async def _persist_state(self):
+        """将沙箱状态持久化到外部存储（执行成功时调用）"""
+        if self.state_store is None:
+            return
+        
+        self.state_store["status"] = "completed"
+        # 生产环境中，这里会将状态写入 Redis 或数据库
+        # 示例：await self.storage_backend.save(self.skill_id, self.state_store)
+        logger.info(f"技能 {self.skill_id} 执行成功，状态已持久化")
+    
+    async def _rollback_state(self):
+        """回滚沙箱状态（执行失败时调用）"""
+        if self.state_store is None:
+            return
+        
+        self.state_store["status"] = "failed"
+        # 生产环境中，这里会清除未完成的中间状态
+        # 确保不会残留不完整的数据影响后续执行
+        logger.warning(f"技能 {self.skill_id} 执行失败，状态已回滚")
+
 ```
+
 ## 5.6 实战案例：构建“智能数据分析 Skill”
+
 ### 设计目标
 构建一个能够自动分析 CSV 数据文件，生成可视化图表和洞察报告的技能。
 **预期功能**：
+
 1. 自动识别数据类型和结构
+
 2. 进行数据清洗和质量检查
+
 3. 生成多种统计图表
+
 4. 提供自然语言的数据洞察
+
 5. 导出分析报告
+
 ### 步骤一：定义技能元数据
+
 ```json
 {
   "name": "smart_data_analysis",
@@ -433,8 +546,11 @@ class SkillSandbox:
   "difficulty": "intermediate",
   "estimated_time": "5-15 minutes"
 }
+
 ```
+
 ### 步骤二：定义输入输出契约
+
 ```json
 {
   "input_schema": {
@@ -472,8 +588,11 @@ class SkillSandbox:
     "required": ["data_source"]
   }
 }
+
 ```
+
 ### 步骤三：设计技能执行流程
+
 ```mermaid
 flowchart TD
     A[开始数据分析] --> B[数据加载与验证]
@@ -503,8 +622,11 @@ flowchart TD
     N --> O[可视化图表生成]
     O --> P[报告组装]
     P --> Q[输出结果]
+
 ```
+
 ### 步骤四：实现技能逻辑
+
 ```python
 class SmartDataAnalysisSkill:
     def __init__(self):
@@ -567,9 +689,11 @@ class SmartDataAnalysisSkill:
         # 使用 LLM 编排分析流程
         analysis_prompt = f"""
         你是一名数据分析专家。当前数据集包含 {len(data)} 行数据。
+
         需要执行的分析类型：{analysis_types}
         
         请规划分析步骤，并使用提供的工具执行。
+
         """
         
         # 这里会启动一个内部 Agent 循环
@@ -581,40 +705,76 @@ class SmartDataAnalysisSkill:
         results = await agent.run(data=data)
         
         return results
+
 ```
+
 ### 步骤五：定义 System Prompt 模板
-```markdown
+
+```
+
+markdown
+
 # 系统角色
 你是一名资深数据分析师，专注于从数据中挖掘商业价值。你擅长使用 Python 进行数据分析，并能够将复杂数据转化为易懂的洞察。
+
 # 工作流程
+
 1. **数据理解阶段**
+
    - 检查数据维度和结构
+
    - 识别数据类型（数值、分类、时间序列等）
+
    - 检测缺失值和异常值
+
 2. **分析执行阶段**
+
    - 根据数据特征选择合适的分析方法
+
    - 使用 Python 工具执行计算
+
    - 验证分析结果的合理性
+
 3. **洞察提炼阶段**
+
    - 从统计结果中发现模式和趋势
+
    - 将技术性发现转化为业务语言
+
    - 提供可操作的建议
+
 4. **可视化阶段**
+
    - 选择最合适的图表类型
+
    - 设计清晰美观的可视化
+
    - 添加必要的注释和标题
+
 # 约束条件
+
 - 始终先验证数据质量
+
 - 避免过度解读数据
+
 - 可视化必须清晰易懂
+
 - 所有结论需要数据支撑
+
 # 输出要求
+
 - 提供结构化的分析报告
+
 - 包含关键图表和指标
+
 - 给出明确的业务建议
+
 ```
+
 ### 步骤六：测试与验证
+
 ```python
+
 # 测试案例
 test_case = {
     "data_source": {
@@ -631,21 +791,34 @@ test_case = {
         "interactive": True
     }
 }
+
 # 执行技能
 skill = SmartDataAnalysisSkill()
-result = await skill.execute(test_case, {"user_id": "analyst_001"})
-# 验证结果
-assert result["status"] == "完成"
-assert "report" in result
-assert len(result["visualizations"]) > 0
+
+async def run_test():
+    result = await skill.execute(test_case, {"user_id": "analyst_001"})
+    # 验证结果
+    assert result["status"] == "完成"
+    assert "report" in result
+    assert len(result["visualizations"]) > 0
+    return result
+
 ```
+
 ## 5.7 技能体系的最佳实践
+
 ### 5.7.1 技能设计原则
+
 1. **单一职责原则**：每个技能应专注于一个明确的业务目标
+
 2. **高内聚低耦合**：技能内部的逻辑紧密相关，技能之间的依赖最小化
+
 3. **渐进式复杂度**：从简单技能开始，逐步构建复杂技能组合
+
 4. **可观测性**：技能执行过程应有完整的日志和监控
+
 ### 5.7.2 技能组合模式
+
 ```mermaid
 graph LR
     subgraph "基础技能层"
@@ -678,8 +851,11 @@ graph LR
     D --> H
     E --> H
     F --> H
+
 ```
+
 ### 5.7.3 错误处理策略
+
 ```python
 class SkillErrorHandler:
     """技能错误处理策略"""
@@ -713,26 +889,22 @@ class SkillErrorHandler:
             return await self._request_user_input(error, context)
         else:
             return await self._fallback_execution(skill, context)
+
 ```
+
 ## 5.8 本章小结
 技能层是 Agent 架构中承上启下的关键环节，它将底层的原子能力封装为可复用的业务解决方案。通过本章的学习，我们掌握了：
+
 1. **技能与工具的本质区别**：技能是更高维度的抽象，包含业务逻辑和上下文
+
 2. **技能的结构化定义**：元数据、契约、核心组件三位一体的设计方法
+
 3. **动态发现机制**：从海量技能中智能匹配最合适的能力
+
 4. **执行编排模式**：安全、高效地执行技能并管理其生命周期
+
 5. **实战构建流程**：从需求分析到测试验证的完整开发过程
 下一章，我们将深入 Agent 的记忆机制，首先探讨如何处理短期交互记忆——Session Memory，这是实现连贯多轮对话的基础。
----
-### 内容检查
-- **正确性检查**：Skill 与 Function 的层级划分清晰，符合当前主流框架的设计理念。技能发现机制中的语义检索方案具备实际落地价值。
-- **顺序检查**：承接 Function Calling，向上构建业务抽象，逻辑顺畅。为后续章节的 Memory 机制做铺垫。
-- **文字流畅性**：表格对比直观，代码示例规范，概念阐述清晰。流程图和架构图帮助理解复杂概念。
-- **实用性检查**：提供了完整的实战案例，从设计到实现，适合自学和实践。包含了最佳实践和错误处理策略。
-### 学习建议
-1. **循序渐进**：先理解概念，再看代码，最后动手实践
-2. **对比学习**：对比不同框架（LangChain、Semantic Kernel）的技能实现方式
-3. **项目实践**：选择一个实际业务场景，尝试构建完整的技能体系
-4. **性能优化**：关注技能加载、执行和缓存的优化策略
 
 ---
 
@@ -744,7 +916,9 @@ class SkillErrorHandler:
 技能数量增加后，内存中的技能列表难以维护和查询。重启服务后所有技能配置丢失，无法支持动态新增技能。
 
 **解决思路与方案：**
+
 ```python
+
 # 技能持久化存储设计
 class SkillRepository:
     """技能仓储层"""
@@ -786,9 +960,13 @@ class SkillRepository:
             params.append(f"%{','.join(tags)}%")
         
         return [self._row_to_skill(row) for row in self.db.fetchall(sql, params)]
+
 ```
+
 - **关系型数据库**：使用MySQL/PostgreSQL存储技能元数据。
+
 - **JSON字段**：技能配置使用JSON字段存储，灵活适应不同技能的配置差异。
+
 - **版本控制**：支持技能版本管理，支持灰度回滚。
 
 ### 5.9.2 技能的热加载与动态更新
@@ -797,6 +975,7 @@ class SkillRepository:
 修改了某个Skill的配置后，需要重启整个服务才能生效。生产环境无法接受频繁重启。
 
 **解决思路与方案：**
+
 ```python
 class HotReloadSkillRegistry:
     """支持热加载的技能注册表"""
@@ -836,9 +1015,13 @@ class HotReloadSkillRegistry:
             skill = Skill(**skill_config)
             self._cache[skill.name] = skill
             logger.info(f"技能热加载成功: {skill.name}")
+
 ```
+
 - **文件监听**：监听技能配置文件变化，自动重新加载。
+
 - **缓存机制**：使用内存缓存提高查询性能。
+
 - **线程安全**：使用锁保证并发安全。
 
 ### 5.9.3 技能执行的资源隔离
@@ -847,6 +1030,7 @@ class HotReloadSkillRegistry:
 某个Skill执行时占用了大量CPU或内存，影响其他Skill的正常运行。缺乏资源隔离机制。
 
 **解决思路与方案：**
+
 ```python
 import resource
 import subprocess
@@ -891,9 +1075,13 @@ class IsolatedSkillExecutor(SkillExecutor):
             }
         except psutil.NoSuchProcess:
             return {"status": "terminated"}
+
 ```
+
 - **进程隔离**：使用子进程或容器隔离执行环境。
+
 - **资源限制**：设置内存和CPU使用上限。
+
 - **实时监控**：监控资源使用，超限时终止执行。
 
 ### 5.9.4 技能的版本管理与灰度发布
@@ -902,6 +1090,7 @@ class IsolatedSkillExecutor(SkillExecutor):
 新版本Skill上线后出现Bug，影响了所有用户。缺乏版本控制手段，无法快速回滚到稳定版本。
 
 **解决思路与方案：**
+
 ```python
 class SkillVersionManager:
     """技能版本管理器"""
@@ -941,7 +1130,11 @@ class SkillVersionManager:
         
         self.repo.update_version_status(skill_name, target_version, "production")
         logger.warning(f"技能 {skill_name} 已回滚到版本 {target_version}")
+
 ```
+
 - **多版本并存**：支持同时维护多个版本的Skill。
+
 - **灰度发布**：先部署到小部分用户，验证后再全量发布。
+
 - **一键回滚**：支持快速回滚到任意稳定版本。

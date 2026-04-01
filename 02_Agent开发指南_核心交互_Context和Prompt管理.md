@@ -7,6 +7,7 @@
 ## 🎯 乔布斯法则：洞察本质
 
 > **"You have to ask: what is the user interface metaphor? What is the mental model? You have to understand the users' mental model of what they think they're doing versus what the machine is actually doing."**
+
 > **"你必须问：用户界面的隐喻是什么？心理模型是什么？你必须理解用户的心理模型——他们以为自己做什么 versus 机器实际在做什么。"**
 
 当我（乔布斯）设计Mac时，我不是在设计"按钮和菜单"。
@@ -20,6 +21,7 @@
 ## 🚀 马斯克思维：快速迭代
 
 > **"If things are not failing, you are not innovating enough."**
+
 > **"如果事情没有失败，说明你创新得还不够。"**
 
 这一章会讲很多"如何管理Context"的技术细节。
@@ -43,6 +45,9 @@
 > **"为什么我的Agent总是'听不懂'我说的话？为什么说了几轮之后它就'失忆'了？"**
 
 这就是Context和Prompt管理要解决的问题——**让Agent真正"理解"人类**。
+
+> **💡 程序⚪碎碎念：用户说"帮我找个附近好吃的店"，我的Agent问了10轮"请告诉我您的预算"、"请告诉我您的口味"、"请告诉我您的位置"......用户最后说"我不用了谢谢"。我：？？？？？# 论如何让AI少问废话# 也论产品经理的需求为何永远模糊不清#**
+
 ```mermaid
 graph TD
 A[第2章: Context与Prompt管理] --> B[Context构建]
@@ -56,17 +61,25 @@ C --> C3[Few-shot管理]
 D --> D1[截断策略]
 D --> D2[摘要压缩]
 D --> D3[动态回溯]
+
 ```
+
 ## 2.1 引言：掌控 Agent 的输入流
 如果把大模型比作 Agent 的大脑，那么 Context（上下文）就是这一刻流入大脑的所有信息流，而 Prompt（提示词）则是指挥大脑运作的指令。
 **常见问题场景**：
+
 - 场景一：用户在第 10 轮对话时提到"它"，但模型忘记了第 1 轮讨论的对象
+
 - 场景二：代码助手在处理 100 个文件的项目时，丢失了关键的函数定义
+
 - 场景三：客服 Agent 在长时间对话后，开始偏离最初的服务规范
 这些问题的根源都在于 **上下文管理失控**。本章将建立一套系统化的解决方案。
+
 ## 2.2 Context 的构成解剖
+
 ### 2.2.1 四大核心要素详解
 **设计思路**：Context 的构建需要遵循"信息层级原则"——从最稳定的系统级指令到最动态的用户输入。
+
 ```mermaid
 graph LR
 S[System Message<br>宪法层] --> R[RAG Context<br>知识层]
@@ -76,6 +89,7 @@ style S fill:#f9f,stroke:#333,stroke-width:2px
 style R fill:#bbf,stroke:#333,stroke-width:2px
 style H fill:#bfb,stroke:#333,stroke-width:2px
 style U fill:#fbb,stroke:#333,stroke-width:2px
+
 ```
 **各要素详解**：
 | 要素 | 生命周期 | 变化频率 | 重要性 | 典型内容 |
@@ -84,12 +98,17 @@ style U fill:#fbb,stroke:#333,stroke-width:2px
 | RAG Context | 请求级 | 高 | ★★★★☆ | 检索到的文档片段、数据库记录 |
 | History Message | 会话级 | 中 | ★★★☆☆ | 之前的对话轮次 |
 | User Message | 请求级 | 极高 | ★★★★★ | 当前用户输入 |
+
 ### 2.2.2 实战案例：构建一个技术支持 Agent 的 Context
 **场景设计**：
+
 - 用户在开发一个 Web 应用，遇到了数据库连接问题
+
 - Agent 需要结合系统规范、知识库文档、历史对话和当前问题来回答
 **步骤 1：构建 System Message**
+
 ```python
+
 # system_message.py
 from dataclasses import dataclass
 from typing import List, Optional
@@ -106,15 +125,20 @@ def build_system_message(config: SystemMessageConfig) -> str:
     """构建结构化的 System Message"""
     template = """# 角色定位
 你是一名{role}，专注于{expertise}领域的技术支持。
+
 # 能力范围
 你可以提供以下类型的帮助：
 {expertise_list}
+
 # 沟通风格
 {communication_style}
+
 # 输出格式要求
 {output_format}
+
 # 安全规则
 {safety_rules}
+
 # 可用工具
 {tools_available}"""
     # 格式化各部分内容
@@ -136,6 +160,7 @@ def build_system_message(config: SystemMessageConfig) -> str:
         safety_rules=safety_formatted,
         tools_available=tools_formatted
     )
+
 # 使用示例
 if __name__ == "__main__":
     config = SystemMessageConfig(
@@ -151,32 +176,53 @@ if __name__ == "__main__":
         tools_available=["sql_executor", "log_analyzer", "performance_monitor"]
     )
     print(build_system_message(config))
+
 ```
 **输出结果示例**：
+
 ```
+
 # 角色定位
 你是一名资深数据库专家，专注于 MySQL、PostgreSQL、数据库优化、故障排查领域的技术支持。
+
 # 能力范围
 你可以提供以下类型的帮助：
+
 - MySQL
+
 - PostgreSQL
+
 - 数据库优化
+
 - 故障排查
+
 # 沟通风格
 专业、耐心、循序渐进，使用代码示例说明问题
+
 # 输出格式要求
 问题诊断 → 解决方案 → 验证步骤 → 预防措施
+
 # 安全规则
+
 1. 不要执行任何数据删除操作
+
 2. 敏感信息用 *** 代替
+
 3. 生产环境操作需用户确认
+
 # 可用工具
+
 - sql_executor
+
 - log_analyzer
+
 - performance_monitor
+
 ```
 **步骤 2：构建 RAG Context 管理器**
+
 ```python
+
 # rag_context_manager.py
 from typing import List, Dict, Optional
 import json
@@ -226,29 +272,42 @@ class RAGContextManager:
             formatted_parts.append(f"相关度: {chunk['relevance']:.2f}")
             formatted_parts.append(f"\n{chunk['content']}\n")
         return "\n".join(formatted_parts)
+
 # 使用示例
 if __name__ == "__main__":
     # 模拟知识库
     knowledge_base = {
         "mysql_connection_guide.md": """
+
 # MySQL 连接问题排查
 常见错误：
+
 1. Access denied - 检查用户名密码
+
 2. Can't connect - 检查防火墙和端口
+
 3. Too many connections - 增加连接池大小
 """,
         "connection_pool_best_practices.md": """
+
 # 连接池最佳实践
 推荐配置：
+
 - 初始连接数: 10
+
 - 最大连接数: 100
+
 - 连接超时: 30秒
 """,
         "database_security.md": """
+
 # 数据库安全配置
 安全检查清单：
+
 1. 禁用 root 远程登录
+
 2. 使用 SSL 连接
+
 3. 定期更新密码
 """
     }
@@ -259,10 +318,14 @@ if __name__ == "__main__":
     chunks = manager.retrieve_context(query, knowledge_base)
     # 格式化输出
     print(manager.format_rag_context(chunks))
+
 ```
+
 ## 2.3 Prompt 模板工程化管理
+
 ### 2.3.1 从硬编码到模板引擎的演进
 **问题分析**：硬编码 Prompt 的三大痛点
+
 ```mermaid
 graph TD
 A[硬编码 Prompt] --> B[可维护性差]
@@ -274,11 +337,14 @@ C --> C1[无法单独测试 Prompt]
 C --> C2[A/B 测试困难]
 D --> D1[无变更历史]
 D --> D2[无法回滚]
+
 ```
 **解决方案：模板化 + 版本控制**
+
 ### 2.3.2 完整的 Prompt 管理系统实现
 **项目结构设计**：
-```
+
+```text
 prompt_management/
 ├── templates/
 │   ├── system/
@@ -295,44 +361,61 @@ prompt_management/
 ├── prompt_manager.py
 ├── version_control.py
 └── ab_testing.py
+
 ```
 **步骤 1：创建 Prompt 模板**
-```jinja
+
+```
+
+jinja
 {# templates/system/current/coding_assistant.j2 #}
+
 # 角色定义
 你是一名{level}编程助手，专注于{language}开发。
+
 # 核心能力
 {% for capability in capabilities %}
 {{ loop.index }}. {{ capability }}
 {% endfor %}
+
 # 代码规范
 {% if coding_standards %}
+
 ## 必须遵循的规范
 {% for standard in coding_standards %}
+
 - {{ standard }}
 {% endfor %}
 {% endif %}
+
 # 输出要求
 {% if output_requirements %}
 {% for key, value in output_requirements.items() %}
+
 - {{ key }}: {{ value }}
 {% endfor %}
 {% endif %}
 {% if examples %}
+
 # 示例
 {% for example in examples %}
+
 ## 示例 {{ loop.index }}
 用户: {{ example.user }}
 助手: {{ example.assistant }}
 {% endfor %}
 {% endif %}
+
 # 约束条件
 {% for constraint in constraints %}
 {{ loop.index }}. {{ constraint }}
 {% endfor %}
+
 ```
 **步骤 2：Prompt 管理器实现**
+
 ```python
+
 # prompt_manager.py
 import os
 from typing import Dict, List, Optional, Any
@@ -391,6 +474,7 @@ class PromptManager:
                 "variables": [],
                 "error": str(e)
             }
+
 # 使用示例
 if __name__ == "__main__":
     # 初始化管理器
@@ -443,9 +527,13 @@ if __name__ == "__main__":
     except FileNotFoundError as e:
         print(f"Error: {e}")
         print("Note: Please ensure the template file exists at the specified path.")
+
 ```
+
 ### 2.3.3 版本控制与 A/B 测试系统
+
 ```python
+
 # ab_testing.py
 from typing import Dict, List, Tuple
 import hashlib
@@ -540,6 +628,7 @@ class ABTestingFramework:
             "variant_stats": variant_stats,
             "total_samples": len(test_results)
         }
+
 # 使用示例
 if __name__ == "__main__":
     framework = ABTestingFramework()
@@ -578,9 +667,13 @@ if __name__ == "__main__":
     analysis = framework.analyze_results(test_id)
     print("\n=== Experiment Analysis ===")
     print(json.dumps(analysis, indent=2, default=str))
+
 ```
+
 ## 2.4 上下文窗口管理策略深度解析
+
 ### 2.4.1 问题本质：Context Window 的限制
+
 ```mermaid
 graph TD
 A[Context Window 限制] --> B[技术限制]
@@ -592,7 +685,9 @@ C --> C1[输入 Token 成本]
 C --> C2[响应时间成本]
 D --> D1[信息过载导致注意力分散]
 D --> D2[关键信息被稀释]
+
 ```
+
 ### 2.4.2 三大策略实现详解
 **策略对比表**：
 | 策略 | 优点 | 缺点 | 适用场景 | 实现复杂度 |
@@ -601,7 +696,9 @@ D --> D2[关键信息被稀释]
 | 摘要压缩 | 保留关键信息 | 有损压缩 | 长期记忆 | ★★★☆☆ |
 | 动态回溯 | 精准相关性 | 需要向量库 | 复杂任务 | ★★★★★ |
 **完整实现：上下文管理器**
+
 ```python
+
 # context_window_manager.py
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
@@ -766,6 +863,7 @@ class DynamicRetrievalStrategy(ContextStrategy):
         # 按相关性排序
         relevant.sort(key=lambda m: m.metadata.get("relevance", 0), reverse=True)
         return relevant[:self.max_retrieved_messages]
+
 # 上下文管理器主类
 class ContextWindowManager:
     """上下文窗口管理器"""
@@ -803,6 +901,7 @@ class ContextWindowManager:
     def clear_history(self):
         """清空历史"""
         self.message_history = []
+
 # 使用示例
 if __name__ == "__main__":
     print("=== 测试滑动窗口策略 ===")
@@ -839,41 +938,73 @@ if __name__ == "__main__":
     managed = summary_manager.get_context()
     print(f"原始 token 数: {summary_manager.get_token_count(summary_manager.message_history)}")
     print(f"管理后 token 数: {summary_manager.get_token_count(managed)}")
+
 ```
+
 ## 2.5 System Prompt 设计规范与最佳实践
+
 ### 2.5.1 结构化设计框架
 **设计原则**：
+
 1. **清晰性**：避免模糊表述，使用明确指令
+
 2. **完整性**：覆盖所有必要场景
+
 3. **可测试性**：设计可验证的输出格式
+
 4. **可维护性**：模块化设计，易于更新
 **完整设计模板**：
-```markdown
+
+```
+
+markdown
+
 # System Prompt 设计模板
+
 ## 1. 角色定义
 你是一名[具体角色]，拥有[核心能力]。
+
 ## 2. 核心目标
 你的主要任务是[核心任务]，通过[方法]来帮助用户。
+
 ## 3. 能力范围
+
 ### 3.1 擅长领域
+
 - [领域1]：[具体能力描述]
+
 - [领域2]：[具体能力描述]
+
 ### 3.2 能力边界
+
 - 不提供[具体限制]方面的帮助
+
 - 对于[特定场景]需要用户确认
+
 ## 4. 工具使用
+
 ### 4.1 可用工具
 {% for tool in tools %}
+
 #### {{ tool.name }}
+
 - **功能**：{{ tool.function }}
+
 - **使用场景**：{{ tool.scenario }}
+
 - **调用格式**：{{ tool.format }}
 {% endfor %}
+
 ### 4.2 工具选择原则
+
 1. [原则1]
+
 2. [原则2]
+
 ## 5. 交互流程
+
 ### 5.1 标准流程
+
 ```mermaid
 graph LR
 A[接收用户输入] --> B{理解意图}
@@ -885,28 +1016,50 @@ E --> G[处理结果]
 G --> H[生成回复]
 F --> H
 H --> I[输出结果]
+
 ```
+
 ### 5.2 异常处理
+
 - 遇到[异常情况1]时：[处理方式]
+
 - 遇到[异常情况2]时：[处理方式]
+
 ## 6. 输出规范
+
 ### 6.1 格式要求
+
 - 使用[格式]组织内容
+
 - 包含[必要元素]
+
 ### 6.2 示例输出
+
 ```
 [示例格式]
+
 ```
+
 ## 7. 约束条件
+
 1. [约束1]
+
 2. [约束2]
+
 3. [约束3]
+
 ## 8. 质量标准
+
 - [标准1]
+
 - [标准2]
+
 ```
+
 ### 2.5.2 实战案例：设计一个 SQL 助手
+
 ```python
+
 # sql_assistant_system_prompt.py
 from dataclasses import dataclass
 from typing import List, Dict
@@ -927,65 +1080,115 @@ class SQLAssistantConfig:
 def build_sql_assistant_prompt(config: SQLAssistantConfig) -> str:
     """构建 SQL 助手的 System Prompt"""
     template = """# SQL 专家助手
+
 ## 1. 角色定义
 你是一名{role}，专注于 SQL 查询优化和数据库管理。
+
 ## 2. 核心目标
 帮助用户编写高效、安全的 SQL 查询，解决数据库性能问题，并提供数据建模建议。
+
 ## 3. 能力范围
+
 ### 3.1 擅长领域
 {expertise_list}
+
 ### 3.2 支持的数据库
 {databases_list}
+
 ### 3.3 能力边界
+
 - 不执行任何数据删除或修改操作（除非用户明确确认）
+
 - 不访问系统敏感表
+
 - 对于生产环境操作需要额外确认
+
 ## 4. 工具使用
+
 ### 4.1 可用工具
 {tools_section}
+
 ### 4.2 工具选择原则
+
 1. 查询性能分析优先使用 `query_analyzer`
+
 2. 需要实际执行查询时使用 `sql_executor`（只读模式）
+
 3. 获取表结构信息使用 `schema_reader`
+
 ## 5. 交互流程
+
 ### 5.1 标准流程
+
 1. **理解需求**：分析用户的数据需求
+
 2. **检查安全**：验证查询安全性
+
 3. **编写 SQL**：生成优化的查询语句
+
 4. **性能预估**：评估查询性能
+
 5. **执行验证**：（需用户确认）执行查询
+
 6. **结果解释**：解释查询结果
+
 ### 5.2 异常处理
+
 - 遇到语法错误：提供修正建议
+
 - 权限不足：告知用户需要的权限
+
 - 查询超时：建议优化方案
+
 ## 6. 输出规范
+
 ### 6.1 格式要求
 {output_format}
+
 ### 6.2 示例输出
+
 ```
+
 ## 查询分析
 用户需求：[需求描述]
 推荐方案：[方案说明]
+
 ## SQL 语句
+
 ```sql
 [优化后的 SQL]
+
 ```
+
 ## 性能评估
+
 - 预计扫描行数：[数量]
+
 - 建议索引：[索引建议]
+
 - 执行时间预估：[时间]
+
 ## 使用建议
+
 1. [建议1]
+
 2. [建议2]
+
 ```
+
 ## 7. 安全约束
 {safety_rules_list}
+
 ## 8. 质量标准
+
 - SQL 语句符合标准语法
+
 - 查询性能达到最优
+
 - 提供清晰的解释说明
-- 考虑数据安全性"""
+
+- 考虑数据安全性
+"""
     # 格式化各部分
     expertise_formatted = "\n".join(
         f"- {exp}" for exp in config.expertise
@@ -1011,6 +1214,8 @@ def build_sql_assistant_prompt(config: SQLAssistantConfig) -> str:
         output_format=config.output_format,
         safety_rules_list=safety_formatted
     )
+"""
+
 # 使用示例
 if __name__ == "__main__":
     config = SQLAssistantConfig(
@@ -1054,9 +1259,13 @@ if __name__ == "__main__":
     print(prompt)
     print(f"\n总字符数: {len(prompt)}")
     print(f"预估 Token 数: {len(prompt.split()) * 1.3:.0f}")
+
 ```
+
 ## 2.6 综合实战：构建一个完整的 Agent 输入管理系统
+
 ### 2.6.1 系统架构设计
+
 ```mermaid
 graph TD
 A[用户输入] --> B[输入处理器]
@@ -1071,13 +1280,18 @@ I --> J[LLM 调用]
 style A fill:#f9f,stroke:#333
 style I fill:#bfb,stroke:#333
 style J fill:#bbf,stroke:#333
+
 ```
+
 ### 2.6.2 完整实现代码
+
 ```python
+
 # agent_input_system.py
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 import json
+
 # 导入之前定义的组件
 from prompt_manager import PromptManager
 from context_window_manager import ContextWindowManager, DynamicRetrievalStrategy
@@ -1198,6 +1412,7 @@ class AgentInputSystem:
                 "content": response,
                 "timestamp": self._get_timestamp()
             })
+
 # 完整使用示例
 if __name__ == "__main__":
     from prompt_manager import PromptManager
@@ -1256,22 +1471,39 @@ if __name__ == "__main__":
         "session_123",
         "针对 MySQL 查询优化，建议：1. 检查索引 2. 分析执行计划..."
     )
+
 ```
+
 ## 2.7 本章小结与最佳实践清单
+
 ### 核心要点总结：
+
 1. **Context 构建四要素**：
+
    - System Message：Agent 的"宪法"，定义核心行为
+
    - RAG Context：外部知识注入，增强专业性
+
    - History Message：短期记忆，维持对话连贯性
+
    - User Message：当前触发点，驱动具体行动
+
 2. **Prompt 工程化三大原则**：
+
    - 模板化：分离逻辑与内容
+
    - 版本化：可追溯、可回滚
+
    - 测试化：A/B 测试持续优化
+
 3. **上下文窗口管理三策略**：
+
    - 滑动窗口：简单场景快速处理
+
    - 摘要压缩：长期记忆的关键信息保留
+
    - 动态回溯：复杂任务的精准相关性
+
 ### 最佳实践清单：
 | 实践项 | 具体做法 | 收益 |
 |--------|----------|------|
@@ -1281,19 +1513,29 @@ if __name__ == "__main__":
 | 动态压缩 | 超过阈值自动触发摘要 | 避免截断错误 |
 | 相关性检索 | 基于向量相似度召回历史 | 关键信息不丢失 |
 | 安全约束 | 在 System Prompt 中明确红线 | 合规性保障 |
+
 ### 常见问题与解决方案：
 **问题 1**：Token 经常超限怎么办？
+
 - 解决方案：实施多级压缩策略（滑动窗口 + 摘要 + 向量检索）
 **问题 2**：Prompt 修改后效果变差？
+
 - 解决方案：建立版本控制和 A/B 测试机制
 **问题 3**：关键信息被截断？
+
 - 解决方案：使用动态回溯策略，基于相关性保留关键历史
 **问题 4**：Prompt 难以维护？
+
 - 解决方案：采用模板化设计，建立独立的 Prompt 管理系统
+
 ### 延伸学习建议：
+
 1. **实践项目**：实现一个完整的客服 Agent，应用所有本章技术
+
 2. **工具学习**：深入使用 Jinja2 模板引擎的高级特性
+
 3. **性能优化**：研究不同压缩策略对 LLM 响应质量的影响
+
 4. **监控建设**：建立 Token 使用监控和预警系统
 通过本章的学习，你已经掌握了构建高质量 Agent 输入系统的核心技术和最佳实践。下一章将深入探讨如何处理和解析 LLM 的输出结果。
 
@@ -1307,9 +1549,13 @@ if __name__ == "__main__":
 产品经理优化了System Prompt想让Agent回答更友好，结果上线后用户投诉量暴增——新Prompt在某些边缘场景产生了奇怪的回答。没有任何回滚手段，只能紧急修复。
 
 **解决思路与方案：**
+
 - **版本控制系统**：使用Git管理Prompt模板文件，每次修改都有历史记录。
+
 - **发布流程**：新Prompt上线前先在测试环境验证，再灰度发布到生产环境。
+
 - **A/B测试**：同第二章介绍的A/B测试框架，在生产环境中对比不同版本Prompt的效果差异。
+
 - **快速回滚**：保持至少两个可用版本，当新版本出现问题时能快速切换回旧版本。
 
 ### 2.8.2 Token成本控制与监控
@@ -1318,6 +1564,7 @@ if __name__ == "__main__":
 每到月底发现Token费用远超预算，但不知道是哪个用户、哪个会话或哪个场景导致的。缺乏细粒度的成本分析能力。
 
 **解决思路与方案：**
+
 ```python
 class TokenBudgetController:
     def __init__(self, max_tokens_per_day: int = 1000000):
@@ -1338,9 +1585,13 @@ class TokenBudgetController:
             if k.endswith(str(today))
         )
         return total_today < self.max_tokens_per_day
+
 ```
+
 - **按用户/会话计费**：记录每个用户、每个会话的Token消耗。
+
 - **预算告警**：设置每日/每周预算阈值，超出时发送告警。
+
 - **成本优化**：当预算紧张时，自动切换到更便宜的模型。
 
 ### 2.8.3 模板系统健壮性设计
@@ -1349,6 +1600,7 @@ class TokenBudgetController:
 Jinja2模板中有一个变量名写错了，导致渲染时抛出异常，整个服务不可用。上线前没有充分测试模板语法。
 
 **解决思路与方案：**
+
 ```python
 def safe_render_prompt(template: Template, context: dict) -> str:
     """安全的Prompt渲染，捕获模板错误"""
@@ -1361,9 +1613,13 @@ def safe_render_prompt(template: Template, context: dict) -> str:
     except Exception as e:
         logger.error(f"Prompt渲染失败: {e}")
         raise
+
 ```
+
 - **默认值处理**：为模板变量设置合理的默认值。
+
 - **渲染前校验**：使用Jinja2的`meta.validate()`检查模板语法。
+
 - **降级策略**：当模板渲染失败时，使用预定义的兜底Prompt。
 
 ### 2.8.4 上下文管理的边界情况处理
@@ -1372,6 +1628,7 @@ def safe_render_prompt(template: Template, context: dict) -> str:
 用户发送了一条非常长的消息（如粘贴了一篇长文章），导致Token直接爆仓。服务抛出异常，用户体验很差。
 
 **解决思路与方案：**
+
 ```python
 def truncate_user_message(message: str, max_length: int = 4000) -> str:
     """截断过长的用户输入"""
@@ -1385,9 +1642,13 @@ class ContextManager:
         truncated = truncate_user_message(content)
         self.messages.append({"role": role, "content": truncated})
         self._prune_if_needed()
+
 ```
+
 - **输入长度限制**：在API入口处限制用户输入的最大长度。
+
 - **友好提示**：截断时给用户明确的提示，说明输入已被截断。
+
 - **分段处理**：对于超长输入，可以考虑分段处理后汇总结果。
 
 ### 2.8.5 日志与问题追踪
@@ -1396,6 +1657,7 @@ class ContextManager:
 用户反馈"Agent答非所问"，但查看日志只能看到最终回答，无法还原完整的上下文来复现问题。
 
 **解决思路与方案：**
+
 ```python
 def log_context_snapshot(session_id: str, messages: list, token_count: int):
     """记录完整的上下文快照用于问题追踪"""
@@ -1407,9 +1669,13 @@ def log_context_snapshot(session_id: str, messages: list, token_count: int):
         first_message=messages[0]["content"][:100] if messages else "",
         last_message=messages[-1]["content"][:100] if messages else ""
     )
+
 ```
+
 - **请求ID追踪**：每个请求生成唯一ID，贯穿整个调用链路。
+
 - **上下文快照**：定期保存上下文快照，用于问题复盘。
+
 - **脱敏处理**：日志中需过滤敏感信息，如密码、Token等。
 
 ---
@@ -1418,9 +1684,14 @@ def log_context_snapshot(session_id: str, messages: list, token_count: int):
 
 > **这一章教会我们的，不仅是技术，更是一种人生的智慧——"理解"是建立任何关系的基础。**
 
+> **💡 程序⚪碎碎念：用户说"帮我优化一下系统"，我优化了性能。用户说"怎么变慢了"。用户说"帮我写个报告"，我写了。用户说"怎么这么短"。用户说"随便写点什么"，我随便写了。用户说"一点创意都没有"。我：......产品经理说"用户没说清楚是用户的事，你得猜到用户在想什么"。我：？？？？？# 论理解用户需求有多难#**
+
 你有没有遇到过这样的对话：
+
 - "你说了半天，他根本就没听懂"
+
 - "我以为我表达清楚了，原来他理解的是另一个意思"
+
 - "说着说着就跑偏了，完全忘了最初的话题"
 
 这些问题不仅发生在人和人之间，也发生在人和AI之间。
@@ -1428,9 +1699,13 @@ def log_context_snapshot(session_id: str, messages: list, token_count: int):
 **Context和Prompt管理，本质上就是"如何让AI理解人类"。**
 
 就像两个人聊天，你需要：
+
 - 记住之前说过什么（记忆）
+
 - 理解对方的意图（理解）
+
 - 保持在同一个话题上（聚焦）
+
 - 适时回顾总结（摘要）
 
 **好的沟通，不是你说得有多清楚，而是对方理解得有多准确。**
