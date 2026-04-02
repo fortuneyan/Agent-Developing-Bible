@@ -515,8 +515,6 @@ print(f"结果: {final_state_2['final_response']}")
 
 ---
 
----
-
 ## 11.8 从POC到规模化生产
 
 ### 11.8.1 POC评估标准
@@ -700,3 +698,197 @@ Pipeline逻辑复杂，每次修改都担心引入Bug。
 - 集成测试验证端到端流程
 
 - 自动化回归测试
+
+---
+
+## 11.10 LangGraph v0.2+ 最新特性
+
+第十一章我们手搓了一个Pipeline编排引擎。但2026年，LangGraph已经进化到了v0.2+版本，很多我们手写的逻辑它已经内置了。
+
+### 11.10.1 持久化检查点（Checkpointing）
+
+v0.2 最重要的功能是**持久化检查点**——Agent执行到任何一步，状态都能保存和恢复。
+
+```python
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import StateGraph
+
+# 创建检查点保存器
+checkpointer = MemorySaver()
+
+# 编译时传入checkpointer
+app = workflow.compile(checkpointer=checkpointer)
+
+# 执行时指定thread_id
+config = {"configurable": {"thread_id": "session-001"}}
+result = app.invoke({"messages": [...]}, config=config)
+
+# 下次可以从同一个thread_id恢复
+result = app.invoke(None, config=config)  # 从上次断点继续
+```
+
+**实际价值**：
+
+- **人工审核**：Agent执行到"等待人工确认"节点时暂停，人类审核后再恢复
+- **长时间任务**：Agent执行到一半服务重启了？没关系，从检查点恢复
+- **时间旅行调试**：回到任意一步重新执行，不需要从头跑
+
+我们第一次用这个功能的时候，最大的感受是——以前为了实现"断点续执"写了200行代码，现在一行配置搞定。
+
+### 11.10.2 子图编排（Subgraph）
+
+v0.2 支持在图中嵌套子图——这相当于函数调用中的"子函数"。
+
+```python
+# 定义子图
+subgraph = StateGraph(SubState)
+subgraph.add_node("analyze", analyze_node)
+subgraph.add_node("report", report_node)
+subgraph.add_edge("analyze", "report")
+
+# 在主图中引用子图
+main_graph = StateGraph(MainState)
+main_graph.add_node("data_pipeline", subgraph.compile())
+main_graph.add_node("publish", publish_node)
+main_graph.add_edge("data_pipeline", "publish")
+```
+
+**适用场景**：
+
+- 把复杂的分析流程封装成子图，主图只关心高层逻辑
+- 多个主图共享同一个子图（复用）
+
+### 11.10.3 流式节点（Streaming）
+
+v0.2 支持对每个节点的输出进行流式监听——前端可以实时展示Agent的思考过程。
+
+```python
+# 流式执行
+for event in app.stream({"messages": [...]}, stream_mode="updates"):
+    for node_name, update in event.items():
+        print(f"节点 {node_name} 输出: {update}")
+```
+
+---
+
+## 11.11 2026年状态机模式在Agent编排中的应用
+
+有限状态机（FSM）在2026年重新火了起来——不是因为它是新技术，而是因为Agent编排天然适合用状态机来建模。
+
+### 11.11.1 为什么Agent需要状态机
+
+Agent执行过程中的每个阶段都可以看作一个状态：
+
+```
+IDLE → THINKING → TOOL_CALLING → PROCESSING → RESPONDING → IDLE
+```
+
+用状态机的好处：
+
+- **明确的状态转换规则**：不可能从THINKING直接跳到RESPONDING
+- **状态守卫**：某些操作只在特定状态下允许执行
+- **状态可视化**：监控面板可以清晰展示Agent当前在哪一步
+
+### 11.11.2 实用实现
+
+```python
+from enum import Enum
+from typing import Optional
+
+class AgentState(Enum):
+    IDLE = "idle"
+    THINKING = "thinking"
+    TOOL_CALLING = "tool_calling"
+    PROCESSING = "processing"
+    RESPONDING = "responding"
+    WAITING_HUMAN = "waiting_human"
+    ERROR = "error"
+
+class StateMachine:
+    """Agent状态机"""
+    
+    # 定义合法的状态转换
+    TRANSITIONS = {
+        AgentState.IDLE: [AgentState.THINKING],
+        AgentState.THINKING: [AgentState.TOOL_CALLING, 
+                              AgentState.RESPONDING, 
+                              AgentState.ERROR],
+        AgentState.TOOL_CALLING: [AgentState.PROCESSING, 
+                                   AgentState.ERROR],
+        AgentState.PROCESSING: [AgentState.THINKING, 
+                                AgentState.RESPONDING,
+                                AgentState.ERROR],
+        AgentState.RESPONDING: [AgentState.IDLE],
+        AgentState.WAITING_HUMAN: [AgentState.THINKING, 
+                                    AgentState.IDLE],
+        AgentState.ERROR: [AgentState.IDLE, AgentState.THINKING],
+    }
+    
+    def __init__(self):
+        self.current = AgentState.IDLE
+    
+    def transition(self, next_state: AgentState) -> bool:
+        """尝试状态转换"""
+        allowed = self.TRANSITIONS.get(self.current, [])
+        if next_state not in allowed:
+            print(f"非法转换: {self.current.value} → {next_state.value}")
+            return False
+        self.current = next_state
+        return True
+```
+
+---
+
+## 11.12 2026年流程编排新范式
+
+除了传统的代码编排，2026年出现了一些新的编排方式。
+
+### 11.12.1 声明式编排
+
+用YAML/JSON定义流程，而不是用代码：
+
+```yaml
+pipeline:
+  name: "report_generation"
+  nodes:
+    - id: fetch_data
+      type: tool
+      tool: "data_query"
+      params: {query: "SELECT * FROM sales"}
+    
+    - id: analyze
+      type: llm
+      model: "gpt-4o"
+      prompt: "分析以下数据: {{fetch_data.result}}"
+      depends_on: ["fetch_data"]
+    
+    - id: human_review
+      type: human_in_loop
+      prompt: "请审核以下分析报告: {{analyze.result}}"
+      depends_on: ["analyze"]
+    
+    - id: publish
+      type: tool
+      tool: "email_send"
+      params: {to: "manager@company.com", body: "{{analyze.result}}"}
+      depends_on: ["human_review"]
+```
+
+**优势**：非技术人员也能理解和修改流程。
+
+### 11.12.2 可视化调试
+
+LangGraph Studio等工具提供了可视化的流程调试界面：
+
+- 图形化展示执行链路
+- 点击任意节点查看输入输出
+- 修改某个节点的输入后重新执行
+- 对比不同版本的执行结果
+
+**一个真实感受**：
+
+> 以前调试一个5节点的Pipeline，每次都要从头跑，一个节点改了要等整个流程跑完。有了可视化调试工具后，可以单独重跑某个节点，调试效率提升了至少5倍。
+
+---
+
+*下一章，我们将走进代码的世界——探索那些已经成熟的Agent框架，看看它们是如何将本章的理论落地的。*

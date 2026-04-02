@@ -897,6 +897,304 @@ def cosine_similarity(vec1, vec2):
 
 ---
 
+### MCP (Model Context Protocol，模型上下文协议)
+
+**中文对照**：模型上下文协议
+
+**定义**：由 Anthropic 于 2024 年底发起的开放协议，定义了 AI Agent 如何标准化地连接外部工具、数据源和软件服务。MCP 的核心理念是"工具定义一次，到处可用"——Agent 通过统一接口发现和调用工具，而不需要为每个工具写适配代码。
+
+**首次定义章节**：第04章 能力扩展_FunctionCalling（4.9节）
+
+**核心概念**：
+
+- **MCP Host**：AI Agent 应用，负责决策何时调用工具
+- **MCP Client**：协议客户端，管理与 Server 的连接
+- **MCP Server**：工具提供者，暴露 Tools、Resources、Prompts
+- **Transport**：传输层，支持 stdio（本地）、SSE、Streamable HTTP（远程）
+
+**生态规模**：截至 2026 年初，MCP 累计下载量超过 9700 万次，成为 Agent-to-Tool 领域的事实标准。
+
+**典型使用场景**：
+
+- 让 Claude Desktop 访问本地文件系统、数据库、Git 仓库
+- 企业 Agent 通过 MCP Server 连接内部 API
+- 开源社区贡献了数百个 MCP Server（GitHub、Slack、Jira 等）
+
+**代码示例**：
+
+```python
+# 使用 MCP Python SDK 创建 Server
+from mcp.server.fastmcp import FastMCP
+
+mcp = FastMCP("MyServer")
+
+@mcp.tool()
+def search_docs(query: str) -> str:
+    """搜索内部文档库"""
+    return search_internal_db(query)
+
+@mcp.resource("config://app")
+def get_config() -> str:
+    """读取应用配置"""
+    return load_config()
+```
+
+**与 Function Calling 的关系**：MCP 不是替代 Function Calling，而是它的"上层标准化"。Function Calling 解决的是"LLM 如何调用工具"，MCP 解决的是"工具如何被标准化发现和接入"。
+
+**相关术语**：Function Calling、A2A、ACP、Tool
+
+---
+
+### A2A (Agent-to-Agent Protocol，智能体间通信协议)
+
+**中文对照**：智能体间通信协议
+
+**定义**：由 Google 于 2025 年 4 月发布的开放协议，定义了不同 AI Agent 之间如何通信、协作和委托任务。如果说 MCP 解决的是"Agent 如何调用工具"，A2A 解决的就是"Agent 如何跟另一个 Agent 说话"。
+
+**首次定义章节**：第10章 多智能体治理（补充内容）
+
+**核心概念**：
+
+- **Agent Card**：Agent 的"名片"，声明自己的能力、接口和可用状态
+- **Task**：Agent 之间传递的工作单元
+- **Message**：Agent 之间的通信消息格式
+- **Artifact**：Agent 产出的结果（文档、代码、数据等）
+
+**典型使用场景**：
+
+- 一个"旅行规划 Agent"调用"酒店预订 Agent"完成住宿安排
+- 企业内"客服 Agent"将复杂问题转交给"技术专家 Agent"
+- 跨组织的 Agent 协作（如供应商 Agent 与采购 Agent 对接）
+
+**A2A vs MCP 一句话区分**：
+
+> MCP 是 Agent 和工具之间的"USB-C"；A2A 是 Agent 和 Agent 之间的"HTTP"。
+
+**代码示例**：
+
+```json
+// Agent Card 示例
+{
+  "name": "travel-booking-agent",
+  "description": "可以查询航班、酒店和租车信息",
+  "capabilities": ["search_flights", "book_hotels", "compare_prices"],
+  "endpoint": "https://api.example.com/a2a/travel-agent",
+  "authentication": "bearer_token"
+}
+```
+
+**相关术语**：MCP、ACP、Multi-Agent、SubAgent
+
+---
+
+### ACP (Agent Communication Protocol，智能体通信协议)
+
+**中文对照**：智能体通信协议
+
+**定义**：2025-2026 年间涌现的又一 Agent 通信标准，由阿里云等中国科技企业推动。ACP 的目标是提供一个更通用的 Agent 互操作框架，兼容 MCP 和 A2A 的设计理念，同时更强调企业级场景（如权限管理、审计日志、多租户隔离）。
+
+**首次定义章节**：第04章 能力扩展_FunctionCalling（补充内容）
+
+**与 MCP/A2A 的关系**：
+
+| 维度 | MCP | A2A | ACP |
+|------|-----|-----|-----|
+| **发起方** | Anthropic | Google | 阿里云等中国企业 |
+| **核心场景** | Agent-to-Tool | Agent-to-Agent | 企业级 Agent 互操作 |
+| **传输方式** | stdio/SSE/HTTP | HTTP | HTTP/gRPC |
+| **成熟度** | 最成熟（97M下载） | 快速发展中 | 早期阶段 |
+
+**选型建议**：
+
+- 如果你的 Agent 主要需要调用外部工具 → MCP
+- 如果你的 Agent 需要和其他 Agent 协作 → A2A
+- 如果你在企业环境，需要权限管理和审计 → 关注 ACP
+
+**相关术语**：MCP、A2A、Multi-Agent
+
+---
+
+### Agentic RAG（智能体化检索增强生成）
+
+**中文对照**：智能体化检索增强生成
+
+**定义**：传统 RAG 是"检索→生成"的线性流程。Agentic RAG 让 Agent 自主决定"需要检索什么""检索结果够不够好""是否需要换关键词再检索"。检索不再是被动的一步操作，而是 Agent 主动规划和迭代的过程。
+
+**首次定义章节**：第08章 RAG检索增强生成（补充内容）
+
+**与传统 RAG 的对比**：
+
+| 维度 | 传统 RAG | Agentic RAG |
+|------|---------|-------------|
+| **检索策略** | 固定：一次检索 | 动态：Agent 自主决定检索次数和策略 |
+| **失败处理** | 检索不到就返回空 | Agent 会换关键词、换检索方式 |
+| **复杂度** | 低 | 高（需要 Agent 规划能力） |
+| **适用场景** | 简单问答 | 复杂多步查询 |
+
+**一个具体例子**：
+
+用户问："对比一下 2024 年和 2025 年我们公司在 AI 领域的专利数量变化。"
+
+- **传统 RAG**：检索一次，可能找不到"对比"维度的信息
+- **Agentic RAG**：Agent 会先检索 2024 年数据，再检索 2025 年数据，然后自己做对比分析。如果某一年数据缺失，Agent 会尝试换关键词再搜。
+
+**相关术语**：RAG、GraphRAG、Corrective RAG、Self-RAG
+
+---
+
+### GraphRAG（图谱检索增强生成）
+
+**中文对照**：图谱检索增强生成
+
+**定义**：由微软在 2024 年提出的 RAG 改进方案。传统 RAG 用向量相似度检索文档片段，GraphRAG 在此基础上增加了知识图谱——先构建文档中的实体关系图，检索时同时利用向量相似度和图谱结构来定位信息。
+
+**首次定义章节**：第08章 RAG检索增强生成（补充内容）
+
+**核心流程**：
+
+```
+文档 → 提取实体和关系 → 构建知识图谱
+                              ↓
+用户问题 → 向量检索 + 图谱遍历 → 更精准的相关片段 → LLM 生成
+```
+
+**为什么需要 GraphRAG**：
+
+举个例子。你有一份 200 页的技术文档，里面提到了"张三负责模块 A，李四负责模块 B，模块 A 依赖模块 B"。
+
+- **传统向量 RAG**：搜"张三负责什么"可能找到相关段落，但搜"模块 A 的依赖链"就很难——因为"依赖链"这个词可能根本没出现在文档里
+- **GraphRAG**：通过知识图谱可以直接回答"模块 A → 依赖 → 模块 B → 负责人 → 李四"
+
+**适用场景**：
+
+- 需要理解实体间关系的场景（组织架构、技术依赖、供应链）
+- 需要回答"全局性问题"（"文档中提到了哪些项目？它们之间有什么关系？"）
+- 文档量大且结构复杂的场景
+
+**局限性**：构建知识图谱的成本较高，不适合小型知识库。
+
+**相关术语**：RAG、Agentic RAG、Embedding、Vector
+
+---
+
+### Reason-Plan-ReAct（推理-规划-行动循环）
+
+**中文对照**：推理-规划-行动循环框架
+
+**定义**：2025-2026 年提出的最新 Agent 规划范式，将 ReAct 的"边想边做"和 Plan-and-Execute 的"谋定后动"结合起来。架构分为三层：Reasoner（推理器，理解问题本质）、Planner（规划器，制定执行计划）、ReAct Executor（执行器，按计划执行并反馈）。
+
+**首次定义章节**：第09章 规划与推理（补充内容）
+
+**三层架构**：
+
+```
+用户问题 → Reasoner（这是什么类型的问题？）
+              ↓
+         Planner（需要几步？每步做什么？依赖关系？）
+              ↓
+         ReAct Executor（逐步执行，遇到问题反馈给 Planner）
+              ↓
+              ↻ 如果执行失败 → Planner 重新规划 → Executor 再执行
+```
+
+**与 ReAct 的对比**：
+
+| 维度 | ReAct | Reason-Plan-ReAct |
+|------|-------|-------------------|
+| **规划** | 无显式规划，每步临时决定 | 先做全局规划，再逐步执行 |
+| **容错** | 失败后可能原地打转 | 失败后触发重新规划 |
+| **长程任务** | 容易偏离目标 | 有全局计划约束，不易偏离 |
+| **Token 消耗** | 中等 | 较高（多了规划层） |
+
+**一句话理解**：
+
+> ReAct 像"边走边看"，Plan-and-Execute 像"谋定后动"，Reason-Plan-ReAct 则是"先想清楚再边走边调整"。
+
+**相关术语**：ReAct、Plan-and-Execute、Planner、Self-Reflection
+
+---
+
+### Plan-and-Act（规划-执行框架）
+
+**中文对照**：规划-执行框架
+
+**定义**：2025 年提出的长程任务规划改进方案。与 Plan-and-Execute 不同，Plan-and-Act 强调"计划不是一次性的"——执行器在每一步都会反馈环境变化，规划器据此动态调整后续计划。
+
+**首次定义章节**：第09章 规划与推理（补充内容）
+
+**核心改进**：
+
+- **动态重规划**：执行过程中发现新信息时，Planner 会更新计划而不是硬着头皮执行完
+- **执行反馈环**：Executor 不只是"照做"，还会告诉 Planner"这一步的实际结果和预期有偏差"
+- **子目标分解**：将大目标分解为可验证的子目标，每完成一个就评估是否需要调整方向
+
+**相关术语**：Plan-and-Execute、ReAct、Reason-Plan-ReAct
+
+---
+
+### Extended Context（扩展上下文窗口）
+
+**中文对照**：扩展上下文窗口
+
+**定义**：2025-2026 年间，主流 LLM 供应商大幅扩展了模型的上下文窗口。Claude 3 支持 200K tokens（约 15 万汉字），Gemini 1.5 Pro 支持 1M tokens（约 70 万汉字）。这意味着 Agent 可以一次性"记住"更长的对话历史和更多的参考资料。
+
+**首次定义章节**：第02章 核心交互_Context和Prompt管理（补充内容）
+
+**实际使用建议**：
+
+- **不是越大越好**：大上下文窗口的推理质量在"中间区域"会下降（Lost in the Middle 现象）
+- **关键信息放两头**：System Prompt 放最前面，当前问题放最后面，中间放参考资料
+- **成本考量**：200K 上下文的调用费用是 4K 的 50 倍，需要评估是否真的需要
+
+**相关术语**：Context、Token、Prompt Caching
+
+---
+
+### Prompt Caching（提示词缓存）
+
+**中文对照**：提示词缓存
+
+**定义**：OpenAI 和 Anthropic 在 2024-2025 年推出的缓存优化技术。当多次调用使用相同或高度相似的 Prompt 前缀时，API 会缓存这部分的计算结果，只对新增内容重新计算。这可以显著降低延迟和成本。
+
+**首次定义章节**：第02章 核心交互_Context和Prompt管理（补充内容）
+
+**实际效果**：
+
+- **成本节省**：缓存命中部分的 token 费用可降低 50%-90%
+- **延迟降低**：缓存命中时首 token 延迟从秒级降到毫秒级
+- **适用场景**：System Prompt 固定的 Agent（每次调用前缀相同）、批量处理相似文档
+
+**一个真实数据**：
+
+我们有一个客服 Agent，System Prompt 约 3000 tokens，每次用户提问约 100 tokens。开启 Prompt Caching 后，System Prompt 部分几乎每次都命中缓存，整体 API 费用降了约 70%。
+
+**注意事项**：缓存有有效期（通常几分钟到几小时），且不同供应商的缓存策略不同。
+
+**相关术语**：Context、Token、Extended Context
+
+---
+
+### Structured Outputs（结构化输出）
+
+**中文对照**：结构化输出
+
+**定义**：OpenAI 在 2024 年推出的功能，允许开发者通过 JSON Schema 严格约束 LLM 的输出格式。与早期的 JSON Mode 不同，Structured Outputs 保证输出不仅"是 JSON"，而且"完全符合你定义的 Schema"——字段齐全、类型正确、枚举值合法。
+
+**首次定义章节**：第03章 模型数据与格式化管理（补充内容）
+
+**与 JSON Mode 的对比**：
+
+| 维度 | JSON Mode | Structured Outputs |
+|------|-----------|-------------------|
+| **保证** | 输出是合法 JSON | 输出符合指定 JSON Schema |
+| **字段** | 可能缺失字段 | 保证所有必填字段存在 |
+| **类型** | 可能类型错误 | 类型严格校验 |
+| **适用模型** | 所有支持 JSON Mode 的模型 | 仅 GPT-4o 及更新模型 |
+
+**相关术语**：Function Calling、JSON Mode、Pydantic
+
+---
+
 ## A.2 术语使用规范
 
 ### 中英文混用标准
