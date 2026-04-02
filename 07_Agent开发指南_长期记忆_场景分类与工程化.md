@@ -495,3 +495,187 @@ class MemoryLifecycleManager:
 ```
 
 > **实战建议**：不要直接删除"低价值"记忆，先移到"归档集合"观察一周，确认没问题再永久删除。我们第一次上线这个功能时，差点把用户的重要设置项（它们的 content 很短）一起清掉了。
+
+---
+
+## 7.9 GraphRAG 在长期记忆中的应用
+
+微软提出的 GraphRAG 不仅适用于 RAG，在长期记忆场景中也大有可为。
+
+### 7.9.1 知识图谱 + 向量混合记忆
+
+第七章我们讲了四类记忆场景。其中"静态用户画像"和"动态项目状态"天然适合用知识图谱来存储——因为它们的核心不是"文本内容"，而是"实体之间的关系"。
+
+**一个具体例子**：
+
+```
+用户画像图谱：
+  (用户A) --[职位]--> (后端工程师)
+  (用户A) --[擅长]--> (Python)
+  (用户A) --[不擅长]--> (前端)
+  (用户A) --[项目]--> (项目X)
+  
+项目状态图谱：
+  (项目X) --[状态]--> (进行中)
+  (项目X) --[技术栈]--> (FastAPI + PostgreSQL)
+  (项目X) --[负责人]--> (用户A)
+  (项目X) --[依赖]--> (项目Y)
+```
+
+当用户问"我负责的项目现在是什么状态"时：
+
+- **纯向量检索**：需要把项目状态描述向量化后匹配，可能召回旧状态
+- **图谱查询**：直接 (用户A) --[项目]--> (项目X) --[状态]--> ?，精准定位
+
+### 7.9.2 实现方案
+
+```python
+from neo4j import GraphDatabase
+
+class GraphMemory:
+    """基于 Neo4j 的图谱记忆"""
+    
+    def __init__(self, uri, user, password):
+        self.driver = GraphDatabase.driver(uri, auth=(user, password))
+    
+    def add_fact(self, user_id: str, subject: str, predicate: str, obj: str):
+        """添加事实到图谱"""
+        with self.driver.session() as session:
+            session.run("""
+                MERGE (u:User {id: $user_id})
+                MERGE (s:Entity {name: $subject})
+                MERGE (o:Entity {name: $object})
+                MERGE (u)-[:HAS_FACT]->(s)-[$predicate]->(o)
+            """, user_id=user_id, subject=subject, 
+                predicate=predicate, object=obj)
+    
+    def query_memory(self, user_id: str, query_type: str) -> list:
+        """查询用户的记忆"""
+        with self.driver.session() as session:
+            result = session.run("""
+                MATCH (u:User {id: $user_id})-[:HAS_FACT]->(s)-[r]->(o)
+                WHERE type(r) = $query_type
+                RETURN s.name, type(r), o.name
+            """, user_id=user_id, query_type=query_type)
+            return [record.values() for record in result]
+```
+
+---
+
+## 7.10 事件日志记忆模式
+
+第七章的四类记忆都偏向"状态"——用户是谁、项目在做什么。但还有一类重要的记忆是"过程"——用户做了什么。
+
+### 7.10.1 什么是事件日志记忆
+
+**场景**：用户问"我上周做了什么？"
+
+- 用户画像回答不了（它只存"用户是谁"）
+- 项目状态回答不了（它只存"项目当前状态"）
+- 向量检索可能找到一些对话片段，但不完整
+
+**事件日志记忆**记录的是：
+
+```
+2026-03-25 10:00 - 用户A 提交了 PR #123
+2026-03-25 14:30 - 用户A 修复了 Bug #456
+2026-03-26 09:00 - 用户A 参加了需求评审会议
+2026-03-26 16:00 - 用户A 部署了 v2.1.0
+```
+
+### 7.10.2 实现方式
+
+```python
+from datetime import datetime, timedelta
+import json
+
+class EventLogMemory:
+    """事件日志记忆 - 记录用户的行为历史"""
+    
+    def __init__(self, storage_path: str = "./event_logs.json"):
+        self.storage_path = storage_path
+        self.events = self._load()
+    
+    def log_event(self, user_id: str, event_type: str, 
+                  description: str, metadata: dict = None):
+        """记录事件"""
+        event = {
+            "user_id": user_id,
+            "event_type": event_type,
+            "description": description,
+            "metadata": metadata or {},
+            "timestamp": datetime.now().isoformat()
+        }
+        self.events.append(event)
+        self._save()
+    
+    def get_events(self, user_id: str, 
+                   since: datetime = None, 
+                   event_type: str = None,
+                   limit: int = 50) -> list:
+        """查询事件"""
+        filtered = [e for e in self.events if e["user_id"] == user_id]
+        
+        if since:
+            filtered = [e for e in filtered 
+                       if datetime.fromisoformat(e["timestamp"]) >= since]
+        
+        if event_type:
+            filtered = [e for e in filtered 
+                       if e["event_type"] == event_type]
+        
+        return filtered[-limit:]
+    
+    def _load(self) -> list:
+        try:
+            with open(self.storage_path) as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return []
+    
+    def _save(self):
+        with open(self.storage_path, "w") as f:
+            json.dump(self.events, f, ensure_ascii=False, indent=2)
+```
+
+---
+
+## 7.11 2026年长期记忆架构全景
+
+综合第七章原有的四类记忆和上面新增的模式，2026年的完整长期记忆架构是这样的：
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                   长期记忆四层架构                          │
+├─────────────────────────────────────────────────────────┤
+│                                                         │
+│  第一层：向量记忆（非结构化回忆）                           │
+│  - 存储：向量数据库（Milvus/Chroma）                       │
+│  - 用途：语义检索历史对话和文档                             │
+│  - 代表：第七章的"时间线索"场景                             │
+│                                                         │
+│  第二层：图谱记忆（实体关系）                               │
+│  - 存储：Neo4j/图数据库                                   │
+│  - 用途：用户画像、项目状态、依赖关系                        │
+│  - 代表：第七章的"静态用户画像"+"动态项目状态"               │
+│                                                         │
+│  第三层：事件日志（行为历史）                               │
+│  - 存储：时序数据库/JSON 日志                              │
+│  - 用途：用户做了什么、什么时候做的                          │
+│  - 代表：本节的事件日志记忆                                 │
+│                                                         │
+│  第四层：规则库（行为约束）                                 │
+│  - 存储：KV 缓存/内存                                     │
+│  - 用途：用户的偏好、禁忌、强制指令                          │
+│  - 代表：第七章的"行为纠偏"场景                             │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+```
+
+**一个务实的建议**：
+
+> 不要一开始就搭四层。先做第一层（向量记忆），跑通业务后按需加第二层（图谱记忆）或第三层（事件日志）。我们见过太多团队花两个月搭"完美记忆架构"，最后发现 80% 的场景只用到了向量检索。
+
+---
+
+*下一章，我们将进入 RAG 的世界——Agent 的"知识外挂"。如果说记忆是 Agent 的"过去"，那 RAG 就是它的"百科全书"。*

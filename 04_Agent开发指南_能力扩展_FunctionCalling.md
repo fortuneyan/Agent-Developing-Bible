@@ -2886,7 +2886,7 @@ async def main():
         await mcp_client.connect(config)
         print(f"Connected to {name}")
 
-### 4.9.6 MCP工具转换为Function Calling格式
+### 4.9.8 MCP工具转换为Function Calling格式
 
 ```python
 """
@@ -2975,7 +2975,7 @@ print(json.dumps(fc_tool, indent=2))
 
 ```
 
-### 4.9.7 完整的Agent集成示例
+### 4.9.9 完整的Agent集成示例
 
 ```python
 """
@@ -3156,7 +3156,7 @@ def function_calling_to_mcp(fc_tool: dict) -> dict:
 
 ```
 
-### 4.9.4 MCP在Agent中的应用
+### 4.9.10 MCP在Agent中的应用
 
 **完整集成示例：**
 
@@ -3212,7 +3212,7 @@ class MCPEnabledAgent:
 
 ```
 
-### 4.9.5 常用MCP服务器推荐
+### 4.9.11 常用MCP服务器推荐
 
 | MCP服务器 | 功能 | 安装命令 |
 |:---|:---|:---|
@@ -3225,7 +3225,7 @@ class MCPEnabledAgent:
 | **sentry** | 错误追踪 | `npx -y @modelcontextprotocol/server-sentry` |
 | **aws-kb-retrieval** | AWS知识库检索 | `npm -y @modelcontextprotocol/server-aws-kb-retrieval` |
 
-### 4.9.6 MCP配置最佳实践
+### 4.9.12 MCP配置最佳实践
 
 1. **安全第一**
 
@@ -3259,7 +3259,7 @@ class MCPEnabledAgent:
 
    - 降级策略：某些工具不可用时不影响核心功能
 
-### 4.9.7 AI_Teacher Agent MCP集成实战
+### 4.9.13 AI_Teacher Agent MCP集成实战
 
 下面展示如何将MCP集成到实际的AI_Teacher Agent项目中：
 
@@ -3590,7 +3590,7 @@ python ai_teacher_agent/main.py --course-name "Python" --enable-mcp --list-tools
 
 ```
 
-### 4.9.8 MCP工具使用示例
+### 4.9.14 MCP工具使用示例
 
 以下是一些常用MCP工具的调用示例：
 
@@ -3647,7 +3647,7 @@ result = await mcp_manager.call_tool("github_search_code", {
 
 ```
 
-### 4.9.9 常见问题排查
+### 4.9.15 常见问题排查
 
 | 问题 | 可能原因 | 解决方案 |
 |:---|:---|:---|
@@ -3657,7 +3657,7 @@ result = await mcp_manager.call_tool("github_search_code", {
 | 权限错误 | 环境变量未设置 | 检查TOKEN等配置 |
 | 工具不存在 | 工具名格式错误 | 使用`servername_toolname`格式 |
 
-### 4.9.8 完整实战案例：构建文件管理Agent
+### 4.9.16 完整实战案例：构建文件管理Agent
 
 下面是一个完整的生产级文件管理Agent，综合应用了前面所有的知识点。
 
@@ -3980,11 +3980,203 @@ if __name__ == "__main__":
 
 ---
 
-## 4.10 本章总结
+## 4.10 2026年MCP生态全景
+
+写到这一节的时候，我忍不住感慨——MCP 从 Anthropic 在 2024 年底发布，到 2026 年初累计下载量突破 9700 万次，只用了不到一年。这个速度在整个开源历史上都排得上号。
+
+但数字背后更重要的问题是：**作为开发者，你现在该怎么用 MCP？**
+
+### 4.10.1 MCP 生态现状
+
+**主流 MCP Server 列表**（截至 2026 年初）：
+
+| 类别 | 工具 | 说明 |
+|------|------|------|
+| **文件系统** | filesystem | 读写文件、目录操作 |
+| **网络** | fetch、puppeteer | 网页抓取、浏览器自动化 |
+| **数据库** | postgres、sqlite、mysql | 数据库查询 |
+| **代码** | git、github、gitlab | 版本控制、代码管理 |
+| **通信** | slack、discord、email | 消息发送 |
+| **云资源** | aws-kb-retrieval、gcp | 云服务集成 |
+| **开发工具** | sentry、linear、jira | 项目管理和错误追踪 |
+| **知识管理** | notion、obsidian | 笔记和知识库 |
+
+**社区工具市场**：
+
+GitHub 上已经有社区维护的 [awesome-mcp-servers](https://github.com/modelcontextprotocol/servers) 仓库，收录了数百个 MCP Server。你几乎不需要自己写 Server——大部分常见服务都有现成的了。
+
+### 4.10.2 MCP vs 传统 Function Calling：到底选哪个？
+
+说实话，这个问题没有标准答案。我们的实践是：
+
+```
+需要快速原型 / 工具数量 < 5 → 传统 Function Calling
+需要接入多个外部服务 / 团队协作 → MCP
+需要工具热插拔 / 跨项目复用 → MCP
+工具定义经常变化 → MCP
+```
+
+**一个真实的迁移故事**：
+
+我们团队在 2025 年 Q3 把 AI_Teacher Agent 的工具调用从传统 Function Calling 迁移到了 MCP。迁移的原因不是"技术更先进"，而是"维护成本太高"——当时我们有 15 个工具，每次加新工具都要改 LLM 适配层、改参数校验、改错误处理。换成 MCP 之后，加新工具只需要写一个 Server，Agent 端零改动。
+
+迁移花了两天时间，但之后每加一个新工具从 2 小时降到了 15 分钟。
+
+---
+
+## 4.11 A2A协议：Agent之间的"普通话"
+
+如果说 MCP 解决的是"Agent 怎么调用工具"，那 A2A（Agent-to-Agent Protocol）解决的就是"Agent 怎么跟另一个 Agent 说话"。
+
+### 4.11.1 为什么需要 A2A？
+
+2025 年 4 月，Google 发布了 A2A 协议。背后的逻辑很清晰：当企业开始部署多个 Agent（客服 Agent、数据分析 Agent、代码审查 Agent……），这些 Agent 之间需要通信，但每个框架的通信方式都不一样。
+
+A2A 定义了标准化的"Agent 名片"（Agent Card）和消息格式，让不同框架开发的 Agent 能互相协作。
+
+### 4.11.2 A2A 核心概念
+
+**Agent Card**：每个 Agent 的"自我介绍"
+
+```json
+{
+  "name": "travel-planner-agent",
+  "description": "可以规划旅行路线、预订酒店和机票",
+  "capabilities": ["plan_itinerary", "book_hotel", "search_flights"],
+  "endpoint": "https://api.example.com/a2a/travel-agent",
+  "authentication": "bearer_token",
+  "version": "1.2.0"
+}
+```
+
+**典型交互流程**：
+
+```
+用户 → 主 Agent："帮我安排下周去上海的出差"
+主 Agent → 查询 A2A 注册中心
+注册中心 → 返回：travel-agent、hotel-agent、flight-agent
+主 Agent → travel-agent：规划行程
+travel-agent → hotel-agent：预订酒店
+travel-agent → flight-agent：预订机票
+各 Agent → 返回结果给主 Agent
+主 Agent → 用户：完整行程方案
+```
+
+### 4.11.3 MCP vs A2A vs ACP：一张表说清楚
+
+| 维度 | MCP | A2A | ACP |
+|------|-----|-----|-----|
+| **解决什么** | Agent 调用工具 | Agent 之间通信 | 企业级 Agent 互操作 |
+| **发起方** | Anthropic | Google | 阿里云等中国企业 |
+| **类比** | USB-C | HTTP | SOAP/REST |
+| **成熟度** | 最成熟（97M下载） | 快速发展中 | 早期 |
+| **传输** | stdio/SSE/HTTP | HTTP | HTTP/gRPC |
+| **适合谁** | 个人/团队开发 Agent | 多 Agent 协作场景 | 企业级部署 |
+
+**选型建议**：
+
+> 如果你的 Agent 只需要调用工具 → MCP 就够了。
+> 如果你的 Agent 需要和其他 Agent 协作 → 关注 A2A。
+> 如果你在企业环境做 Agent 平台 → 同时关注 ACP。
+
+---
+
+## 4.12 工具发现标准化：2026年的新趋势
+
+2024年我们还在手动注册工具。到2026年，"工具发现"（Tool Discovery）本身成了一个标准化的工程问题。
+
+### 4.12.1 从硬编码到动态发现
+
+**过去（硬编码）**：
+
+```python
+# 每次加新工具都要改代码
+tools = [
+    {"name": "search", "func": search_tool},
+    {"name": "calculator", "func": calc_tool},
+    # 新工具？改这里，重新部署
+]
+```
+
+**现在（动态发现）**：
+
+```python
+# MCP Server 启动时自动声明自己的能力
+# Agent 启动时自动发现所有可用工具
+# 新工具上线，Agent 自动感知，无需重启
+```
+
+### 4.12.2 语义工具匹配
+
+当工具数量达到几百个时，Agent 不可能把所有工具描述都塞进 Prompt。这时候需要**语义匹配**：
+
+```
+用户问题："帮我查一下上个月的销售额"
+→ 语义匹配引擎
+→ 候选工具：sales_query (0.92), report_generator (0.78), data_export (0.65)
+→ 只把 Top-3 工具描述传给 LLM
+→ LLM 从中选择
+```
+
+**实现方式**：
+
+1. 将所有工具的 description 向量化
+2. 用户问题向量化
+3. 计算相似度，取 Top-K
+4. 将 Top-K 工具描述注入 Prompt
+
+这和我们第 5 章讲的"技能发现"是同一个思路，只不过粒度更细。
+
+---
+
+## 4.13 2026年工具安全新考量
+
+随着 MCP 和 A2A 的普及，Agent 能调用的工具越来越多，安全问题也上升到了新的高度。
+
+### 4.13.1 工具权限矩阵
+
+```python
+# 基于角色的工具权限
+TOOL_PERMISSIONS = {
+    "admin": ["*"],                          # 管理员：所有工具
+    "developer": ["git", "code_review", "deploy_staging"],
+    "analyst": ["data_query", "report_gen"],
+    "support": ["knowledge_search", "ticket_create"],
+    "user": ["chat", "faq_search"],
+}
+```
+
+### 4.13.2 工具调用审计
+
+```python
+import logging
+from datetime import datetime
+
+def audit_tool_call(user_id: str, tool_name: str, args: dict, result: str):
+    """记录每次工具调用，用于事后审计"""
+    logging.info(
+        "tool_call_audit",
+        extra={
+            "user_id": user_id,
+            "tool_name": tool_name,
+            "args_preview": str(args)[:200],
+            "result_preview": str(result)[:200],
+            "timestamp": datetime.now().isoformat()
+        }
+    )
+```
+
+**一个真实的教训**：
+
+我们曾经有一个 `execute_sql` 工具，只做了"只读"限制，但没做用户级别的权限控制。结果一个普通用户通过 Agent 查到了其他部门的销售数据。从那以后，我们在每个工具调用前都加了权限校验层。
+
+---
+
+## 4.14 本章总结
 
 本章深入讲解了Function Calling的核心原理与进阶实战，包括：
 
-### 4.10.1 核心知识点
+### 4.14.1 核心知识点
 
 **1. Function Calling基础**
 
@@ -4020,7 +4212,7 @@ if __name__ == "__main__":
 
 - 最佳实践与踩坑指南
 
-### 4.10.2 能力提升路径
+### 4.14.2 能力提升路径
 
 ```text
 入门级：
@@ -4041,7 +4233,7 @@ if __name__ == "__main__":
 
 ```
 
-### 4.10.3 实战检查清单
+### 4.14.3 实战检查清单
 
 在将Agent投入生产前，确保完成以下检查：
 
@@ -4119,4 +4311,4 @@ if __name__ == "__main__":
 
 ---
 
-**下一章预告：** 第五章将探讨如何将零散的Function封装为更高层级的抽象——Agent Skills（技能），实现更加复杂的任务规划和多工具协作。
+*下一章，我们将探讨如何将零散的 Function 封装为更高层级的抽象——Agent Skills（技能），实现更加复杂的任务规划和多工具协作。*
