@@ -1,0 +1,11 @@
+[
+  {
+    "id": "shutdown-1774009640443",
+    "from": "team-lead",
+    "to": "book-explorer",
+    "type": "shutdown_request",
+    "content": "{\"type\":\"shutdown_request\",\"request_id\":\"shutdown-1774009640443\",\"reason\":\"任务已完成，感谢你的工作。\",\"from\":\"team-lead\",\"timestamp\":\"2026-03-20T12:27:20.443Z\"}",
+    "timestamp": "2026-03-20T12:27:20.443Z",
+    "read": true
+  }
+]

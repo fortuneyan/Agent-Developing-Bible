@@ -1,0 +1,23 @@
+{
+  "name": "_auto_017aa190d5134b60b06e4d3626dfada7",
+  "leadAgentId": "017aa190d5134b60b06e4d3626dfada7",
+  "workspacePath": "c:\\Users\\jike\\Desktop\\agent 开发指南",
+  "createdAt": "2026-03-20T11:45:18.505Z",
+  "options": {
+    "workspacePath": "c:\\Users\\jike\\Desktop\\agent 开发指南",
+    "isAutoTeam": true
+  },
+  "members": [
+    {
+      "memberId": "team-lead@_auto_017aa190d5134b60b06e4d3626dfada7",
+      "name": "team-lead",
+      "role": "Team Lead - coordinates the team and interacts with the user"
+    },
+    {
+      "memberId": "term-analyzer@_auto_017aa190d5134b60b06e4d3626dfada7",
+      "name": "term-analyzer",
+      "role": "分析全书术语使用情况"
+    }
+  ],
+  "isAutoTeam": true
+}

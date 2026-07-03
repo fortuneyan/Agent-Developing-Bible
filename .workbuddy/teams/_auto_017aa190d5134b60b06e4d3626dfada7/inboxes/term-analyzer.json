@@ -1,0 +1,20 @@
+[
+  {
+    "id": "msg-1774009517395-39gxk0",
+    "from": "team-lead",
+    "to": "term-analyzer",
+    "type": "message",
+    "content": "请开始执行术语分析任务",
+    "timestamp": "2026-03-20T12:25:17.395Z",
+    "read": true
+  },
+  {
+    "id": "shutdown-1774009640445",
+    "from": "team-lead",
+    "to": "term-analyzer",
+    "type": "shutdown_request",
+    "content": "{\"type\":\"shutdown_request\",\"request_id\":\"shutdown-1774009640445\",\"reason\":\"术语分析任务已完成，感谢你的工作。\",\"from\":\"team-lead\",\"timestamp\":\"2026-03-20T12:27:20.445Z\"}",
+    "timestamp": "2026-03-20T12:27:20.445Z",
+    "read": true
+  }
+]
