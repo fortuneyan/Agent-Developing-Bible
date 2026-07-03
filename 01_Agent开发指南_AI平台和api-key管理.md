@@ -1,20 +1,34 @@
-# 第一章：基础设施——API Vendor & Key 管理（重构版）
+# 第一章：基础设施——API Vendor & Key 管理（2026.07 更新）
 
-> **本章导读：如果你把AI Agent想象成一辆汽车，那么这一章讲的就是"如何给汽车加油"和"如何保养发动机"。没有稳定的能源，再好的车也跑不起来。**
+> **本章导读：如果把 AI Agent 想象成一辆汽车，这一章讲的就是"如何给汽车加油"和"如何保养发动机"。没有稳定的能源，再好的车也跑不起来。**
+
+---
+
+## 2026年7月：供应商生态全景
+
+AI 大模型市场的迭代速度在 2026 年上半年再次超出预期。本章写作于 3 月，仅 4 个月后，主流供应商的旗舰模型已全面换代。动手写代码之前，先看清这张牌桌：
+
+| 供应商 | 主力模型 | 输入 $/1M | 输出 $/1M | 上下文窗口 | 缓存折扣 |
+|--------|---------|-----------|-----------|-----------|---------|
+| **OpenAI** | GPT-5.4 / GPT-5.4 Mini | $2.50 / $0.75 | $15 / $4.50 | 1M | 缓存输入 1 折 |
+| **Anthropic** | Claude Sonnet 4.6 / Opus 4.7 | $3 / $5 | $15 / $25 | 1M | 缓存读取 1 折 |
+| **Google** | Gemini 3.1 Pro / Flash | $1.25 / $0.075 | $5 / $0.30 | 2M | 上下文缓存 |
+| **DeepSeek** | V4 Pro / V4 Flash | $1.74 / $0.14 | $3.48 / $0.28 | 1M | 缓存命中 2 折 |
+
+几个值得注意的变化：
+
+- **Prompt Caching 已成标配**。五家供应商全部支持，缓存命中可将输入成本降低 50%-90%。这也是本章 1.6 节专门新增专题的原因。
+- **长上下文不再溢价**。1M 上下文窗口已成 2026 年旗舰模型的默认配置，Google Gemini 3.1 Pro 甚至提供 2M。
+- **OpenAI 兼容接口成为事实标准**。DeepSeek、通义千问、Kimi 等国产模型默认提供 OpenAI SDK 兼容的 API 端点，切换供应商只需改 `base_url` 和 `model` 名称。
+- **MCP（Model Context Protocol）** 于 2025 年底移交 Linux Foundation 治理，已成为 Agent 工具调用的行业标准协议。本章代码示例中默认支持 MCP 式工具接入。
 
 ---
 
 ## 🎯 乔布斯灵魂拷问
 
-> **"When you're a carpenter making a beautiful chest of drawers, you're not going to use a piece of plywood on the back, even though it faces the wall. You'll know it's there, so you're going to use a beautiful piece of wood on the back."**
+> **"When you're a carpenter making a beautiful chest of drawers, you're not going to use a piece of plywood on the back, even though it faces the wall."**
 
-> **"当一个木匠做一个漂亮的抽屉柜时，你不会在背面用胶合板，即使它对着墙。你知道它在那里，所以你会用漂亮的木头做背面。"**
-
-**一个真正的艺术家，即使没人看到的地方，也要做得完美。**
-
-**一个真正的工程师，即使最底层的代码，也要做得优雅。**
-
-这一章讲的是"底层中的底层"——如何管理AI的能源。
+一个真正的工程师，即使最底层的代码，也要做得优雅。这一章讲的就是"底层中的底层"——如何管理 AI 的能源。
 
 ---
 
@@ -22,38 +36,22 @@
 
 > **"If you don't make things, you don't know, and you probably don't know how to reason about the problem."**
 
-> **"如果你不亲自做东西，你就不会真正理解，你可能也不知道如何推理这个问题。"**
+很多人问："为什么不直接调用 OpenAI API？"
 
-很多人问："为什么不直接调用OpenAI API？"
-
-让我问你：**如果你的车只能用一个加油站，而且那个加油站随时可能关门，你还怎么跑长途？**
+让我问你：**如果你的车只能用一个加油站，而且那个加油站随时可能关门，你怎么跑长途？**
 
 这就是第一性原理：**任何单一依赖都是脆弱的。**
 
 ---
 
-本章讲解如何构建生产级的LLM网关层，解决多供应商适配、安全存储、流量控制与容错等核心问题。通过适配器模式与工厂模式实现供应商解耦，采用环境变量与KMS保障API Key安全，运用指数退避、Key Pool和熔断机制确保高可用，并建立Token消耗的成本监控体系。
-
----
-
-## 💡 本章核心问题
-
-> **"我的Agent总不能一直依赖某一个API吧？如果那个API挂了怎么办？"**
-
-这就是本章要解决的问题。就像你不会把所有鸡蛋放在一个篮子里，**成熟的系统也不会只有一个AI供应商**。
-
----
-
 ## 1.1 引言：构建稳健的模型调用底座
 
-如果把 AI Agent 比作一辆高性能跑车，大语言模型（LLM）就是它的"发动机"。然而，直接在业务代码中通过 `import openai` 调用 API，就像是把发动机直接裸露在外，缺乏底盘支撑，既不安全也难以维护。
+如果把 AI Agent 比作一辆高性能跑车，大语言模型就是它的"发动机"。然而，直接在业务代码中 `import openai` 调用 API，就像是把发动机裸露在外——缺乏底盘支撑，不安全也不易维护。
 
-本章将构建一个标准化的 **LLM Gateway（网关层）**，解决以下核心问题：
+本章将构建一个标准化的 **LLM 网关层**，解决三个核心问题：
 
 *   **解耦**：业务代码与具体供应商解耦。
-
 *   **安全**：密钥的全生命周期管理。
-
 *   **稳定**：应对限流与故障的容错机制。
 
 ---
@@ -61,17 +59,15 @@
 ## 1.2 多供应商管理策略
 
 ### 1.2.1 设计思路：适配器模式与工厂模式
-**为什么需要这一层？**
 
-不同的供应商（OpenAI, Anthropic, 国产大模型）接口定义各异。例如 OpenAI 使用 `messages` 数组，而某些旧模型可能接受字符串 `prompt`。如果在业务代码里写满 `if provider == 'openai': ... elif provider == 'claude': ...`，系统将变得极其脆弱。
+不同供应商接口定义各异。如果在业务代码里写满 `if provider == 'openai': ... elif provider == 'claude': ...`，系统将变得极其脆弱。
 
-> **💡 程序⚪碎碎念：我司有个祖传代码，2万行if-else，产品经理说"加个新功能很简单"——我看了3天没看懂逻辑，测试了2周没测完。现在看到"供应商适配"四个字，我的PTSD就犯了。所以这一章我们用设计模式，把if-else炸掉重构：））**
+但也要提醒一点：2026 年多数国产模型（DeepSeek、通义千问、Kimi）已完全兼容 OpenAI SDK 格式，切换只需改 `base_url` 和 `model` 名。适配器模式的价值更多体现在**需要跨供应商容灾、成本路由、缓存策略差异化**的场景——千万不要为了"设计模式"而过度设计。
 
 **设计方案：**
 
-1.  **适配器模式**：定义一个统一的 `BaseLLMClient` 接口，为每个供应商编写具体的"适配器"类，负责将统一请求转换为供应商特有请求。
-
-2.  **工厂模式**：通过配置文件动态决定实例化哪个适配器。
+1.  **适配器模式**：定义统一的 `BaseLLMClient` 接口，每个供应商编写具体适配器类，将统一请求转换为供应商特有请求。
+2.  **工厂模式**：通过配置动态决定实例化哪个适配器。
 
 **架构流程图：**
 
@@ -81,10 +77,10 @@ A[业务逻辑层] -->|调用统一接口| B(BaseLLMClient 抽象层)
 B -->|路由| C{LLMClientFactory}
 C -->|provider=openai| D[OpenAIAdapter]
 C -->|provider=anthropic| E[AnthropicAdapter]
-C -->|provider=azure| F[AzureAdapter]
-D -->|HTTP请求| G((OpenAI API))
-E -->|HTTP请求| H((Anthropic API))
-F -->|HTTP请求| I((Azure API))
+C -->|provider=deepseek| F[DeepSeekAdapter]
+D -->|HTTP| G((OpenAI API))
+E -->|HTTP| H((Anthropic API))
+F -->|HTTP| I((DeepSeek API))
 subgraph "基础设施层"
 B
 C
@@ -92,15 +88,11 @@ D
 E
 F
 end
-
 ```
 
 ### 1.2.2 代码实现：统一的接口定义
 
-首先，定义标准接口。我们使用 Python 的 `abc` 模块定义抽象基类，强制子类实现特定方法。
-
 ```python
-
 # llm/base.py
 from abc import ABC, abstractmethod
 from typing import List, Dict, Optional
@@ -111,8 +103,8 @@ class LLMResponse:
     """统一的响应对象，屏蔽底层差异"""
     content: str
     model: str
-    usage: Dict[str, int] # {"prompt_tokens": 10, "completion_tokens": 20}
-    raw_response: Dict # 原始返回，用于调试
+    usage: Dict[str, int]  # {"prompt_tokens": 10, "completion_tokens": 20}
+    raw_response: Dict     # 原始返回，用于调试
 
 class BaseLLMClient(ABC):
     """大模型客户端抽象基类"""
@@ -124,40 +116,29 @@ class BaseLLMClient(ABC):
         temperature: float = 0.7,
         **kwargs
     ) -> LLMResponse:
-        """
-        核心对话接口
-        :param messages: 标准消息列表 [{"role": "user", "content": "..."}]
-        :param model: 模型标识符
-        """
         pass
-    # 可以扩展嵌入、微调等接口
-
 ```
 
 ### 1.2.3 代码实现：具体适配器与工厂
 
-**OpenAI 适配器示例：**
+**OpenAI 适配器示例（2026 SDK 最新写法）：**
 
 ```python
-
 # llm/adapters/openai_adapter.py
-import openai
+from openai import OpenAI
 from ..base import BaseLLMClient, LLMResponse
 
 class OpenAIAdapter(BaseLLMClient):
     def __init__(self, api_key: str, base_url: Optional[str] = None):
-        # 初始化 OpenAI 客户端
-        self.client = openai.OpenAI(api_key=api_key, base_url=base_url)
+        self.client = OpenAI(api_key=api_key, base_url=base_url)
 
     def chat_completion(self, messages, model, temperature=0.7, **kwargs) -> LLMResponse:
-        # 1. 调用底层 API
         response = self.client.chat.completions.create(
-            model=model,
+            model=model,       # 如 "gpt-5.4", "gpt-5.4-mini"
             messages=messages,
             temperature=temperature,
             **kwargs
         )
-        # 2. 转换为统一格式
         return LLMResponse(
             content=response.choices[0].message.content,
             model=response.model,
@@ -167,33 +148,37 @@ class OpenAIAdapter(BaseLLMClient):
             },
             raw_response=response.model_dump()
         )
-
 ```
 
-**简单工厂实现：**
+> **💡 实战提示**：2026 年 GPT 系列使用 `client.chat.completions.create()` 仍然是推荐方式，但 OpenAI 已推出新的 Responses API（`client.responses.create()`），新项目可以优先考虑。不过 Chat Completions API 依然是兼容性最广的选择。
+
+**简单工厂：**
 
 ```python
-
 # llm/factory.py
-from .base import BaseLLMClient
-from .adapters.openai_adapter import OpenAIAdapter
-
-# from .adapters.anthropic_adapter import AnthropicAdapter
 class LLMClientFactory:
-    @staticmethod
-    def create_client(provider: str, api_key: str, **config) -> BaseLLMClient:
-        if provider == "openai":
-            return OpenAIAdapter(api_key=api_key, **config)
-        # elif provider == "anthropic":
-        #     return AnthropicAdapter(api_key=api_key, **config)
-        else:
+    _adapters = {
+        "openai": OpenAIAdapter,
+        # "anthropic": AnthropicAdapter,
+        # "deepseek": lambda key: OpenAIAdapter(key, base_url="https://api.deepseek.com"),
+    }
+
+    @classmethod
+    def create_client(cls, provider: str, api_key: str, **config) -> BaseLLMClient:
+        adapter_cls = cls._adapters.get(provider)
+        if adapter_cls is None:
             raise ValueError(f"Unsupported provider: {provider}")
+        return adapter_cls(api_key=api_key, **config)
 
 # 使用示例
 client = LLMClientFactory.create_client("openai", api_key="sk-xxx")
-response = client.chat_completion(messages=[{"role": "user", "content": "Hello"}])
-
+response = client.chat_completion(
+    messages=[{"role": "user", "content": "Hello"}],
+    model="gpt-5.4-mini"
+)
 ```
+
+注意：DeepSeek、通义千问等 OpenAI 兼容的供应商，复用 `OpenAIAdapter` 并传入对应的 `base_url` 即可，无需额外编写适配器。
 
 ---
 
@@ -203,12 +188,9 @@ response = client.chat_completion(messages=[{"role": "user", "content": "Hello"}
 
 API Key 是系统的"心脏"。安全策略应遵循**纵深防御**原则：
 
-1.  **开发环境**：通过 `.env` 文件隔离，防止提交到 Git。
-
-2.  **生产环境**：通过环境变量注入，或使用专业的 KMS（密钥管理系统）。
-
+1.  **开发环境**：通过 `.env` 文件隔离，`.gitignore` 中排除。
+2.  **生产环境**：通过环境变量注入，或使用 KMS（密钥管理系统）。
 3.  **架构隔离**：**绝对禁止**在前端代码或客户端直接持有高权限 Key。
-**架构设计图：**
 
 ```mermaid
 graph LR
@@ -218,55 +200,47 @@ graph LR
     subgraph "服务端"
         B -->|验证用户身份| C{权限校验}
         C -->|合法| D[Key 管理器]
-        D -->|从环境变量/KMS读取| E[("Secure Storage (Vault/Env)")]
+        D -->|从环境变量/KMS读取| E[("Secure Storage")]
         D -->|使用高权限 Key| F[LLM Provider]
     end
-    style A fill:#f9f,stroke:#333
-    style F fill:#ff9,stroke:#333
-
 ```
 
-### 1.3.2 实践步骤：环境变量管理
-**步骤 1：创建 `.env` 文件**
-在项目根目录创建 `.env` 文件，并将其加入 `.gitignore`。
+### 1.3.2 实践步骤
+
+**步骤 1：创建 `.env` 文件并加入 `.gitignore`**
 
 ```bash
-
 # .env
 OPENAI_API_KEY=sk-proj-xxxxxxxxxxxx
 ANTHROPIC_API_KEY=sk-ant-xxxxxxxxxxxx
-
+DEEPSEEK_API_KEY=sk-xxxxxxxxxxxx
 ```
+
 **步骤 2：使用 Pydantic 进行配置管理**
-推荐使用 `pydantic-settings` 自动读取环境变量，并提供类型校验。
 
 ```python
-
 # config/settings.py
 from pydantic_settings import BaseSettings
+
 class Settings(BaseSettings):
     openai_api_key: str
-    anthropic_api_key: str
+    anthropic_api_key: str = ""
+    deepseek_api_key: str = ""
+
     class Config:
         env_file = ".env"
         env_file_encoding = 'utf-8'
 
-# 全局单例
 settings = Settings()
-
-# 使用
-print(settings.openai_api_key) # 自动从环境变量读取，若不存在会报错
-
 ```
 
 ---
 
 ## 1.4 高级流量控制与容错
-这是生产环境最容易出问题的地方。
 
-### 1.4.1 设计思路：指数退避
-当 API 返回 `429 Too Many Requests` 时，不能立即重试（这样只会加剧拥堵），而应等待一段时间。指数退避策略是：每次重试等待时间翻倍，并添加随机抖动以防止多个客户端同时重试（惊群效应）。
-**流程图：**
+### 1.4.1 指数退避
+
+当 API 返回 `429 Too Many Requests` 时，不能立即重试（只会加剧拥堵），应等待一段时间。指数退避策略：每次重试等待时间翻倍，并添加随机抖动防止多个客户端同时重试（惊群效应）。
 
 ```mermaid
 flowchart TD
@@ -274,22 +248,17 @@ flowchart TD
     B -- 成功 (200) --> C[返回结果]
     B -- 限流 (429) --> D{重试次数 < 最大值?}
     D -- 否 --> E[抛出异常]
-    D -- 是 --> F[计算等待时间]
-    F --> G[等待 time.sleep]
+    D -- 是 --> F[计算等待时间: 2^retry + jitter]
+    F --> G[等待]
     G --> A
-    subgraph "计算逻辑: 2^retry_count + random_jitter"
-        F
-    end
-
 ```
 
-### 1.4.2 代码实现：重试装饰器
-使用 Python 装饰器可以优雅地将重试逻辑与业务逻辑解耦。
+### 1.4.2 重试装饰器
 
 ```python
-import time
-import random
+import time, random
 from functools import wraps
+
 def retry_on_rate_limit(max_retries=3, base_delay=1):
     def decorator(func):
         @wraps(func)
@@ -298,69 +267,21 @@ def retry_on_rate_limit(max_retries=3, base_delay=1):
                 try:
                     return func(*args, **kwargs)
                 except Exception as e:
-                    # 假设这里捕获的是 RateLimitError (需根据实际 SDK 调整)
                     if "429" in str(e) and attempt < max_retries - 1:
-                        # 指数退避 + 抖动
-                        wait_time = (base_delay * (2 ** attempt)) + random.uniform(0, 1)
-                        print(f"Rate limit hit. Retrying in {wait_time:.2f}s...")
-                        time.sleep(wait_time)
+                        wait = base_delay * (2 ** attempt) + random.uniform(0, 1)
+                        print(f"Rate limit hit. Retrying in {wait:.2f}s...")
+                        time.sleep(wait)
                     else:
                         raise
         return wrapper
     return decorator
-
-# 使用示例
-@retry_on_rate_limit(max_retries=3)
-def call_llm(client, messages):
-    return client.chat_completion(messages=messages)
-
 ```
 
-### 1.4.3 设计思路：API Key 池
-单个 Key 有 RPM（每分钟请求数）限制。为了高并发，我们可以配置多个 Key，构建一个简单的 **Key Pool**。
-**轮转逻辑：**
+### 1.4.3 API Key 池与熔断
 
-1.  维护一个 Key 列表。
+单个 Key 有 RPM（每分钟请求数）限制。为支持高并发，维护一个 Key 池：轮询取出可用 Key，触发 429 的 Key 移入"冷冻仓"，一段时间后自动解冻。
 
-2.  请求时轮询取出 Key。
-
-3.  如果某 Key 触发 429，将其放入"冷冻仓"，一段时间后再启用。
-**实现代码：**
-
-```python
-import time
-from collections import deque
-class APIKeyPool:
-    def __init__(self, keys: list, cooldown_seconds=60):
-        self.keys = deque(keys) # 可用 Key 队列
-        self.cooldown = cooldown_seconds
-        self.cooling_keys = {} # {key: unfreeze_timestamp}
-    def get_key(self):
-        # 1. 检查冷冻仓是否有解冻的 Key
-        now = time.time()
-        for key, unfreeze_time in list(self.cooling_keys.items()):
-            if now >= unfreeze_time:
-                self.keys.append(key)
-                del self.cooling_keys[key]
-        # 2. 轮询获取 Key
-        if not self.keys:
-            raise Exception("No available API keys! All in cooldown.")
-        
-        # 简单的轮询：取出一个并放回队尾（如果不报错的话）
-        # 实际上更推荐随机选择，这里简化为 pop 左侧
-        return self.keys[0]
-    def report_rate_limit(self, key):
-        # 遇到限流，移入冷冻仓
-        if key in self.keys:
-            self.keys.remove(key)
-            self.cooling_keys[key] = time.time() + self.cooldown
-            print(f"Key {key[:8]}... cooling down.")
-
-```
-
-### 1.4.4 熔断机制
-当供应商服务完全不可用（如宕机）时，重试不仅无效，还会阻塞线程。熔断器像家里的电闸，当错误率达到阈值，直接"跳闸"，后续请求直接失败或降级，不再发起网络请求。
-**状态机流转：**
+熔断机制则像是电闸——当某供应商连续失败超过阈值，直接"跳闸"，后续请求不再发起网络调用，而是降级到备用供应商或直接返回错误。
 
 ```mermaid
 stateDiagram-v2
@@ -369,543 +290,220 @@ stateDiagram-v2
     Open --> HalfOpen : 等待超时
     HalfOpen --> Closed : 探测请求成功
     HalfOpen --> Open : 探测请求失败
-
 ```
 
 ---
 
 ## 1.5 成本监控与追踪
 
-### 设计思路：可观测性
-LLM 是昂贵的资源。基础设施层必须对上层透明地记录成本。核心方法是为每个请求生成唯一的 `Trace ID`，并将其与用户 ID 绑定。
-**实现步骤：**
+LLM 是昂贵的资源。2026 年 7 月各供应商的真实定价如下：
 
-1.  **拦截请求**：在 Adapter 调用前后埋点。
+| 模型 | 输入 $/1M | 输出 $/1M | 缓存输入 $/1M |
+|------|----------|----------|-------------|
+| GPT-5.4 | $2.50 | $15.00 | $0.25 |
+| GPT-5.4 Mini | $0.75 | $4.50 | $0.075 |
+| GPT-5.4 Nano | $0.20 | $1.25 | $0.02 |
+| Claude Sonnet 4.6 | $3.00 | $15.00 | $0.30 |
+| Claude Haiku 4.5 | $1.00 | $5.00 | $0.10 |
+| Gemini 3.1 Flash | $0.075 | $0.30 | — |
+| DeepSeek V4 Flash | $0.14 | $0.28 | $0.028 |
 
-2.  **计算 Token 成本**：不同模型价格不同，需建立价格表。
-
-3.  **日志记录**：结构化日志（JSON 格式），便于 ELK 分析。
+核心方法：为每个请求生成唯一的 Trace ID，将其与用户 ID 绑定，拦截所有 Adapter 调用来记录 Token 消耗和成本。
 
 ```python
-import structlog # 推荐使用 structlog 进行结构化日志
+import structlog
 logger = structlog.get_logger()
-def log_usage(provider, model, usage_tokens, user_id):
-    # 简化的成本计算逻辑
-    cost_per_1k = 0.01 # 示例价格
-    cost = (usage_tokens / 1000) * cost_per_1k
-    logger.info("llm_call", provider=provider, model=model, tokens=usage_tokens, cost=cost, user_id=user_id)
 
+# 2026年7月真实定价（美元 / 1M tokens）
+PRICING = {
+    "gpt-5.4":          (2.50, 15.00),
+    "gpt-5.4-mini":     (0.75, 4.50),
+    "claude-sonnet-4-6": (3.00, 15.00),
+    "deepseek-v4-flash": (0.14, 0.28),
+    "gemini-3.1-flash":  (0.075, 0.30),
+}
+
+def log_usage(provider, model, prompt_tokens, completion_tokens, user_id):
+    input_price, output_price = PRICING.get(model, (0, 0))
+    cost = (prompt_tokens / 1_000_000) * input_price + \
+           (completion_tokens / 1_000_000) * output_price
+    logger.info("llm_call",
+        provider=provider, model=model,
+        prompt_tokens=prompt_tokens, completion_tokens=completion_tokens,
+        cost=round(cost, 6), user_id=user_id)
 ```
+
+> **💡 Batch API 省钱技巧**：2026 年 OpenAI 和 Anthropic 均提供 Batch API，非实时任务可获得 **50% 折扣**。如果你在跑夜间批处理、离线分析等任务，务必走 Batch 通道。
 
 ---
 
-## 1.6 LLM 响应缓存机制
+## 1.6 Prompt Caching：2026年最重要的成本优化手段
 
-### 为什么需要缓存
+> **省钱的秘密藏在请求的重复前缀里。**
 
-在生产环境中，你会发现很多请求是**重复的**：
+### 为什么重要？
 
-*   用户反复询问同一个常见问题
+在生产环境中，Agent 的请求存在大量重复前缀：系统 Prompt、工具定义、RAG 检索的上下文、多轮对话的历史——这些内容在每个请求中都会重复发送。2026 年，**五大主流供应商全部支持 Prompt Caching**，当你重复发送相同前缀时，缓存命中的 Token 价格可降低 50%-90%。
 
-*   系统 Prompt + 用户输入的组合高度相似
+### 各家缓存机制对比
 
-*   RAG 检索到的上下文片段相同
+| 供应商 | 缓存方式 | 缓存写入价格 | 缓存读取折扣 | TTL |
+|--------|---------|------------|------------|-----|
+| **OpenAI** | 自动（前缀匹配） | 无额外费用 | 输入价 1 折 | 5-10 min |
+| **Anthropic** | 显式标记 `cache_control` | 输入价 1.25x | 输入价 1 折 | 5 min |
+| **DeepSeek** | 自动（前缀匹配） | 无额外费用 | 缓存命中 $0.028/M | 自动管理 |
+| **Google Gemini** | 上下文缓存 API | 按 Token 计费 | 存储 Token 折扣 | 可配置 |
+| **智谱 GLM** | 自动（前缀匹配） | 无额外费用 | 显著折扣 | 自动管理 |
 
-这些重复调用消耗 Token 却产生相同结果。**缓存可以将响应时间从秒级降到毫秒级，同时显著降低成本。**
+OpenAI 和 DeepSeek 的"自动"意味着你不需要改代码——只要请求前缀相同，缓存自动生效。Anthropic 则需要显式在 Prompt 中插入 `cache_control` 标记来指定缓存边界。
 
-### 缓存策略设计
+### 如何最大化缓存命中率？
 
-**1. 缓存键的生成**
+三个简单原则：
 
-缓存键需要稳定且唯一，通常包含：
-
-*   模型名称
-
-*   温度参数（temperature=0 的结果可缓存，>0 的通常不缓存）
-
-*   消息内容的哈希值
-
-```python
-import hashlib
-import json
-
-def generate_cache_key(model: str, messages: list, temperature: float) -> str:
-    """生成缓存键：相同输入应产生相同键"""
-    if temperature > 0:
-        # 非确定性输出不缓存
-        return None
-    
-    # 将消息序列化为稳定字符串
-    content = json.dumps({
-        "model": model,
-        "messages": messages,
-        "temperature": temperature
-    }, sort_keys=True, ensure_ascii=False)
-    
-    return hashlib.sha256(content.encode()).hexdigest()[:32]
-
-```
-
-**2. 缓存层实现**
-
-使用内存缓存（如 `functools.lru_cache`）或分布式缓存（如 Redis）：
+1. **静态内容放最前面**：系统提示词、工具定义、固定指令 → 放在 messages 数组的前面。
+2. **保持前缀一致**：一个字符的差异都会导致缓存 miss。用常量管理系统 Prompt，不要动态拼接。
+3. **相似的请求批量发送**：在高频时段连续发送，保持缓存活跃。
 
 ```python
-from functools import lru_cache
-import time
-from typing import Optional
+# ❌ 错误：可变内容在前，破坏缓存
+messages = [
+    {"role": "user", "content": user_query},        # 每次不同
+    {"role": "system", "content": SYSTEM_PROMPT},   # 固定但放在后面 → 缓存miss
+]
 
-class LLMCache:
-    """简单的 TTL 缓存实现"""
-    
-    def __init__(self, ttl_seconds: int = 3600):
-        self._cache = {}
-        self._ttl = ttl_seconds
-    
-    def get(self, key: str) -> Optional[dict]:
-        if key not in self._cache:
-            return None
-        
-        value, expiry = self._cache[key]
-        if time.time() > expiry:
-            del self._cache[key]
-            return None
-        
-        return value
-    
-    def set(self, key: str, value: dict):
-        self._cache[key] = (value, time.time() + self._ttl)
-    
-    def clear(self):
-        self._cache.clear()
-
-# 集成到 Adapter
-class CachedOpenAIAdapter(OpenAIAdapter):
-    def __init__(self, api_key: str, cache: Optional[LLMCache] = None):
-        super().__init__(api_key)
-        self.cache = cache or LLMCache()
-    
-    def chat_completion(self, messages, model, temperature=0.7, **kwargs) -> LLMResponse:
-        # 只有 temperature=0 且非流式请求才缓存
-        if temperature == 0 and not kwargs.get("stream"):
-            cache_key = generate_cache_key(model, messages, temperature)
-            if cache_key:
-                cached = self.cache.get(cache_key)
-                if cached:
-                    print(f"[Cache Hit] 命中缓存，节省 Token")
-                    return LLMResponse(**cached)
-        
-        # 未命中缓存，调用父类方法
-        response = super().chat_completion(messages, model, temperature, **kwargs)
-        
-        # 写入缓存
-        if temperature == 0 and cache_key:
-            self.cache.set(cache_key, {
-                "content": response.content,
-                "model": response.model,
-                "usage": response.usage,
-                "raw_response": response.raw_response
-            })
-        
-        return response
-
+# ✅ 正确：固定内容在前，缓存生效
+messages = [
+    {"role": "system", "content": SYSTEM_PROMPT},   # 固定前缀 → 缓存命中
+    {"role": "user", "content": user_query},         # 可变内容 → 全价
+]
 ```
 
-**3. 缓存命中率监控**
+对于 Anthropic 客户端，还需要显式标记：
 
 ```python
-class CacheMetrics:
-    def __init__(self):
-        self.hits = 0
-        self.misses = 0
-    
-    @property
-    def hit_rate(self) -> float:
-        total = self.hits + self.misses
-        return self.hits / total if total > 0 else 0.0
-    
-    def record(self, hit: bool):
-        if hit:
-            self.hits += 1
-        else:
-            self.misses += 1
-
+# Anthropic 的显式缓存标记
+response = client.messages.create(
+    model="claude-sonnet-4-6",
+    system=[
+        {
+            "type": "text",
+            "text": SYSTEM_PROMPT,
+            "cache_control": {"type": "ephemeral"}  # 标记此处为缓存边界
+        }
+    ],
+    messages=[{"role": "user", "content": user_query}]
+)
 ```
 
-### 缓存使用建议
+### 客户端缓存 vs 服务端缓存
 
-| 场景 | 是否缓存 | 原因 |
-|------|---------|------|
-| temperature=0 | ✅ 是 | 输出确定性，可安全缓存 |
-| temperature>0 | ❌ 否 | 输出随机，缓存无意义 |
-| 流式输出 | ❌ 否 | 技术复杂度高，收益有限 |
-| 敏感数据查询 | ❌ 否 | 隐私合规风险 |
-| FAQ 类问题 | ✅ 是 | 高频重复，缓存价值高 |
+本章原 1.6 节介绍了客户端缓存（建立缓存键、TTL 管理等）。坦白说，**2026 年服务端 Prompt Caching 让大部分客户端缓存场景不再必要**。客户端缓存的逻辑复杂性（缓存键生成、失效管理、温度参数判断）远高于直接依赖服务端缓存。除非你的场景满足以下条件：
+
+- temperature=0 的确定性查询
+- FAQ 类高频重复问题
+- 对延迟有极端要求（客户端缓存毫秒级 vs 服务端缓存仍需网络往返）
+
+否则，优先利用服务端 Prompt Caching，把精力留给更重要的事。
 
 ---
 
 ## 1.7 负载均衡与模型路由
 
-### 为什么需要路由层
+### 为什么需要路由层？
 
-当你接入了多个模型供应商（OpenAI + Azure + 国产模型），面临的挑战是：
+当你接入了多个供应商，面临的挑战是：
 
-*   **成本优化**：不同模型价格差异大，简单任务用便宜模型
+- **成本优化**：不同模型价格差异巨大，简单任务不应调用旗舰模型
+- **容灾切换**：主供应商故障时自动 fallback
+- **性能平衡**：高并发时分散到多个 endpoint
 
-*   **容灾切换**：主供应商故障时自动 fallback
-
-*   **性能平衡**：高并发时分散到多个 endpoint
-
-### 简单路由策略
-
-**1. 基于任务类型的路由**
+### 基于任务的分层路由（2026 推荐策略）
 
 ```python
 class ModelRouter:
-    """根据任务特征选择最优模型"""
-    
-    ROUTE_RULES = {
-        # 任务类型 -> (首选模型, 备选模型, 成本等级)
-        "code_generation": ("gpt-4o", "claude-3-opus", "high"),
-        "simple_qa": ("gpt-4o-mini", "gpt-3.5-turbo", "low"),
-        "creative_writing": ("claude-3-sonnet", "gpt-4o", "medium"),
-        "data_extraction": ("gpt-4o", "gpt-4o-mini", "medium"),
+    """2026年7月推荐路由策略"""
+
+    # 按任务复杂度分层，而非按"供应商品牌"
+    ROUTES = {
+        # 层1：高频简单任务 → 最便宜的模型
+        "classification":  "gpt-5.4-nano",        # $0.20/$1.25
+        "extraction":      "gemini-3.1-flash",     # $0.075/$0.30
+
+        # 层2：日常生产任务 → 性价比最优
+        "chat":            "gpt-5.4-mini",         # $0.75/$4.50
+        "summarization":   "deepseek-v4-flash",    # $0.14/$0.28
+
+        # 层3：复杂推理/代码 → 前沿模型
+        "code_generation": "claude-sonnet-4-6",    # $3/$15
+        "complex_reasoning": "gpt-5.4",             # $2.50/$15
+
+        # 层4：最高质量（仅在结果质量决定业务 outcome 时使用）
+        "critical_task":   "claude-opus-4-7",       # $5/$25
     }
-    
-    def route(self, task_type: str, complexity: str = "medium") -> str:
-        """根据任务类型和复杂度选择模型"""
-        if task_type in self.ROUTE_RULES:
-            primary, fallback, cost = self.ROUTE_RULES[task_type]
-            # 简单任务降级到更便宜的模型
-            if complexity == "low" and cost == "high":
-                return fallback
-            return primary
-        return "gpt-4o-mini"  # 默认兜底
 
-```
+    def route(self, task_type: str, fallback: bool = False) -> str:
+        return self.ROUTES.get(task_type, "gpt-5.4-mini")
 
-**2. 基于成本的路由**
-
-```python
-class CostAwareRouter:
-    """根据预算使用情况动态选择模型"""
-    
-    def __init__(self, daily_budget_usd: float = 100.0):
-        self.daily_budget = daily_budget_usd
-        self.today_spent = 0.0
-    
-    def select_model(self, estimated_tokens: int) -> str:
-        """
-        预算充足时用 GPT-4o，紧张时降级到 Mini
-        """
-        # 估算成本（简化计算）
-        gpt4o_cost = (estimated_tokens / 1000) * 0.005
-        
-        remaining = self.daily_budget - self.today_spent
-        
-        if remaining > gpt4o_cost * 2:
-            # 预算充足，用最好的
-            return "gpt-4o"
-        elif remaining > gpt4o_cost:
-            # 预算紧张，降级
-            return "gpt-4o-mini"
-        else:
-            # 预算耗尽，拒绝服务或走免费模型
-            raise RuntimeError("Daily budget exceeded")
-
-```
-
-**3. 故障转移（Failover）**
-
-```python
-class FailoverRouter:
-    """主供应商故障时自动切换"""
-    
-    def __init__(self, providers: list):
-        self.providers = providers  # [(provider_name, client_instance), ...]
-        self.circuit_breakers = {
-            name: CircuitBreaker() for name, _ in providers
+    def get_fallback(self, task_type: str) -> str:
+        """同类能力的备选模型"""
+        FALLBACK = {
+            "gpt-5.4": "claude-sonnet-4-6",
+            "claude-sonnet-4-6": "deepseek-v4-pro",
+            "gpt-5.4-mini": "deepseek-v4-flash",
+            "gpt-5.4-nano": "gemini-3.1-flash",
         }
-    
-    def call_with_failover(self, messages, **kwargs) -> LLMResponse:
-        """按优先级尝试多个供应商"""
-        for provider_name, client in self.providers:
-            cb = self.circuit_breakers[provider_name]
-            
-            if cb.state == CircuitState.OPEN:
-                continue  # 熔断器打开，跳过
-            
-            try:
-                response = client.chat_completion(messages, **kwargs)
-                cb.record_success()
-                return response
-            except Exception as e:
-                cb.record_failure()
-                print(f"[{provider_name}] 调用失败: {e}")
-                continue
-        
-        raise RuntimeError("All providers failed")
-
+        primary = self.route(task_type)
+        return FALLBACK.get(primary, "gpt-5.4-mini")
 ```
 
-### 路由配置示例
-
-```yaml
-
-# config/routing.yaml
-routing:
-  default_provider: openai
-  
-  failover_order:
-
-    - openai
-
-    - azure
-
-    - deepseek
-  
-  cost_optimization:
-    enabled: true
-    budget_limit_usd: 500
-    
-  model_selection:
-    code_review:
-      primary: gpt-4o
-      fallback: claude-3-sonnet
-    
-    chat:
-      primary: gpt-4o-mini
-      fallback: gpt-3.5-turbo
-
-```
+**选型原则**：日常任务从 Mini/Flash 层开始评估，只在评测证明质量确实不够时再升级到 Pro/旗舰层。OpenAI 已将 Batch API（50% 折扣）作为标准选项——所有非实时任务都应该走 Batch。
 
 ---
 
-## 1.8 本章小结
-本章我们从零构建了一个生产级的 LLM 基础设施层。通过适配器模式解决了供应商异构问题，通过环境变量与隔离策略保障了密钥安全，并利用指数退避、Key Pool 和熔断机制实现了高可用架构。
+## 1.8 LLM 网关：选型还是自建？
+
+回到本章开头的问题："我的 Agent 总不能一直依赖某一个 API 吧？"
+
+答案是——你可能不需要从头写一个网关。
+
+2026 年，社区已有三家成熟的 LLM Gateway 方案，各自覆盖不同场景：
+
+| 维度 | **LiteLLM** | **OpenRouter** | **Portkey** |
+|------|-----------|--------------|-----------|
+| **形态** | 开源自托管 | SaaS 平台 | SaaS / 自托管 |
+| **模型覆盖** | 100+（手动接入） | 300+（自动聚合） | 100+（自动接入） |
+| **定价** | 免费（仅服务器成本） | 供应商价格 + 5% | $99/月起 |
+| **缓存** | 基础 | — | 语义缓存（命中率 30-50%） |
+| **可观测性** | 基础日志 | 基础 Dashboard | 企业级（审计、PII 检测） |
+| **运维** | 需要自己管 | 零运维 | 零运维 |
+| **最佳场景** | 重度使用者、需要完全控制 | Indie 开发者、MVP 阶段 | 企业团队、合规要求 |
+
+**选型决策框架：**
+
+- **MVP 阶段 / 独立开发者（0-100 用户）**：OpenRouter。30 分钟接入，单一账单，模型自由切换。
+- **成长阶段 / 成本敏感（100-1000 用户）**：LiteLLM 自托管 + DeepSeek V4 Flash 等低价通道。数据完全隔离，灵活路由。
+- **企业团队（1000+ 用户、合规要求）**：Portkey 或自建。完整 Observability、团队审计、SOC2/HIPAA 合规。
+- **国内场景、跨境外卡困难**：商业中转站或 DeepSeek 直连。价格更低，国内可访问。
+
+> **一个真实案例**：2026 年 4 月，Indie 开发者李辰在博客中记录了从 Anthropic 直连迁移到 OpenRouter 的体验：改一行 `baseURL`，5 分钟完成切换。等用户量涨到 1000+ 后，他又迁移到 LiteLLM 自托管，配合 DeepSeek V4 Flash 做简单任务的成本路由，月账单从 $600 降到 $180。（来源：xiaoliblog.com）
+
+如果你选择自建，本章 1.2-1.7 的架构设计就是你的地基。如果你选择 LiteLLM/OpenRouter/Portkey，这些方案内部已经实践了适配器模式、熔断、重试等机制，你只需要关注路由策略和成本监控。
+
+---
+
+## 1.9 本章小结
+
+本章从零构建了一个生产级的 LLM 基础设施层。通过适配器模式解决了供应商异构问题，通过环境变量与隔离策略保障了密钥安全，利用指数退避、Key Pool 和熔断机制实现了高可用。2026 年新增的 Prompt Caching 专题和 LLM Gateway 选型框架，让你在动手写代码之前就能做出更优的架构决策。
+
 **检查清单：**
 
 *   [ ] 业务代码中是否不再包含 `if provider == 'xxx'` 逻辑？
-
 *   [ ] `.env` 文件是否已加入 `.gitignore`？
-
-*   [ ] 是否实现了针对 429 错误的重试机制？
-
-*   [ ] 是否有 Token 消耗的日志记录？
+*   [ ] 是否实现了针对 429 和 5xx 错误的重试/熔断机制？
+*   [ ] 是否有 Token 消耗的日志记录和成本告警？
+*   [ ] 系统 Prompt 等固定内容是否放在了 messages 最前面以利用 Prompt Caching？
+*   [ ] 非实时任务是否走了 Batch API（节省 50%）？
+*   [ ] 是否评估过 LiteLLM/OpenRouter/Portkey 等成熟网关方案，避免重复造轮子？
 
 在下一章，我们将探讨如何组织输入给模型的内容，即 **Context（上下文）** 和 **Prompt（提示词）** 的工程化管理。
-
----
-
-## 1.7 补充内容：生产环境关键议题
-
-### 1.7.1 测试与质量保证
-
-**常见问题场景：**
-当我们修改了Adapter的请求逻辑或更换了LLM Provider后，如何确保现有的业务调用不受影响？一个典型的困境是：上线了新版本的Adapter，结果线上大量请求失败，因为某个边缘情况的参数处理逻辑被意外修改。
-
-**解决思路与方案：**
-
-- **单元测试**：为每个Adapter编写独立的单元测试，使用Mock模拟API响应。重点测试异常情况，如超时、网络错误、JSON解析失败等。
-
-- **集成测试**：使用真实的API Key（建议使用测试环境Key）对完整链路进行测试。可以设计一套"黄金测试集"，包含常见请求场景，每次变更后自动运行。
-
-- **回归测试**：建立自动化回归测试流水线，当代码变更时自动触发。推荐使用GitHub Actions或Jenkins。
-
-### 1.7.2 生产环境部署
-
-**常见问题场景：**
-开发环境中运行良好的代码，部署到生产环境后却问题频发。可能是环境差异、配置问题或资源限制导致的。
-
-**解决思路与方案：**
-
-- **Docker容器化**：将LLM Gateway封装为Docker镜像，确保开发、测试、生产环境一致性。
-
-- **Kubernetes部署**：对于高可用需求，使用K8s进行编排，设置合理的副本数和资源限制。
-
-- **配置分离**：使用环境变量或配置中心管理不同环境的配置，避免硬编码。
-
-- **健康检查**：实现`/health`端点，定期检查API Key有效性、数据库连接等。
-
-### 1.7.3 监控与告警
-
-**常见问题场景：**
-线上API调用突然大量超时或失败，但运维团队一无所知，直到用户投诉才被发现。缺乏有效的监控导致故障发现滞后。
-
-**解决思路与方案：**
-
-- **指标采集**：使用Prometheus采集关键指标，如请求成功率、平均延迟、Token消耗、P99延迟等。
-
-- **告警规则**：设置合理的告警阈值，如错误率超过5%、延迟超过2秒等。
-
-- **日志规范**：使用结构化日志（JSON格式），记录请求ID、耗时、错误信息等，便于故障定位。
-
-- **Dashboard**：构建Grafana仪表盘，展示系统健康状态和业务指标。
-
-### 1.7.4 代码组织建议
-
-**常见问题场景：**
-随着业务增长，Adapter代码越来越臃肿，所有逻辑堆在一起，难以维护和扩展。新增一个Provider需要修改大量代码。
-
-**解决思路与方案：**
-
-- **项目结构**：建议采用以下目录结构
-
-```text
-llm_gateway/
-├── adapters/          # 各Provider适配器
-│   ├── __init__.py
-│   ├── base.py       # 抽象基类
-│   ├── openai.py
-│   ├── anthropic.py
-│   └── azure.py
-├── factory.py        # 工厂类
-├── config.py         # 配置管理
-├── middleware/       # 中间件（日志、监控、限流）
-├── tests/            # 测试代码
-└── main.py           # 入口文件
-
-```
-
-- **类型提示**：为所有Adapter方法添加类型提示，提高代码可读性和IDE支持。
-
-- **统一异常**：定义统一的异常类，如`LLMProviderError`、`RateLimitError`等，便于调用方统一处理。
-
-### 1.7.5 错误处理最佳实践
-
-**常见问题场景：**
-LLM API调用失败时，代码直接抛出原始异常，导致上层业务逻辑崩溃。用户看到的是晦涩的错误信息，体验很差。
-
-**解决思路与方案：**
-
-```python
-class LLMGatewayError(Exception):
-    """LLM网关统一异常基类"""
-    def __init__(self, message: str, code: str = "UNKNOWN_ERROR"):
-        self.message = message
-        self.code = code
-        super().__init__(self.message)
-
-class RateLimitError(LLMGatewayError):
-    def __init__(self, message: str = "Rate limit exceeded"):
-        super().__init__(message, code="RATE_LIMIT_ERROR")
-
-class ProviderError(LLMGatewayError):
-    def __init__(self, message: str, provider: str):
-        super().__init__(f"[{provider}] {message}", code="PROVIDER_ERROR")
-
-```
-调用方可以针对不同异常类型采取不同策略，如RateLimitError触发退避重试，ProviderError切换备选Provider等。
-
----
-
-### 1.7.6 供应商风险管理
-
-**常见问题场景：**
-单一LLM供应商服务突然中断，导致线上业务完全不可用。没有任何备选方案，业务损失巨大。或者某供应商价格大幅上涨，成本失控。
-
-**解决思路与方案：**
-
-```python
-class MultiProviderManager:
-    """多供应商管理器"""
-    
-    def __init__(self, providers: list):
-        self.providers = {p.name: p for p in providers}
-        self.current_provider = None
-        self.failover_config = {
-            "max_retries": 3,
-            "failover_threshold": 5,  # 连续失败5次触发切换
-            "recovery_time": 300  # 5分钟后尝试恢复
-        }
-    
-    def get_provider(self) -> BaseLLMClient:
-        """获取当前可用的供应商"""
-        # 检查当前供应商是否可用
-        if self.current_provider and self._is_healthy(self.current_provider):
-            return self.current_provider
-        
-        # 寻找备用供应商
-        for name, provider in self.providers.items():
-            if self._is_healthy(provider):
-                self.current_provider = provider
-                logger.info(f"切换到供应商: {name}")
-                return provider
-        
-        raise NoAvailableProviderError("所有供应商均不可用")
-    
-    def _is_healthy(self, provider) -> bool:
-        """检查供应商健康状态"""
-        # 检查连续失败次数
-        if provider.fail_count >= self.failover_config["failover_threshold"]:
-            # 检查是否超过恢复时间
-            if time.time() - provider.last_fail_time > self.failover_config["recovery_time"]:
-                provider.fail_count = 0  # 重置，尝试恢复
-                return True
-            return False
-        return True
-
-```
-
-**SLA管理策略：**
-
-- 与供应商签订明确的服务等级协议
-
-- 建立供应商绩效考核机制
-
-- 定期评估供应商能力和价格竞争力
-
-- 保持至少2个可用供应商的切换能力
-
-### 1.7.7 供应商切换策略
-
-**常见问题场景：**
-需要更换LLM供应商，但切换过程风险很高。一旦出现问题影响大量用户。
-
-**解决思路与方案：**
-
-- **渐进式切换**：先切换5%流量，观察无异常后逐步提升
-
-- **AB对比**：新旧供应商同时运行，对比输出质量
-
-- **快速回滚**：一旦发现异常，秒级切换回原供应商
-
-- **数据同步**：确保切换过程中用户无感知
-
----
-
-## 💭 程序员感悟：不要把鸡蛋放在一个篮子里
-
-> **这一章教会我们的，不仅是如何管理多个AI供应商，更是一种人生的智慧。**
-
-> **💡 程序⚪碎碎念：我的Leader说"这个需求很简单，下班前做完"。我已经连续一周11点下班了。我的Leader说"这个Bug很简单，改一下就行"。我找了一天没找到问题在哪。我的Leader说"AI供应商挂了对我们没影响吧"。我：......（内心：您说得对，我现在就辞职）**
-
-你有没有想过：
-
-- 为什么优秀的公司都会同时使用多个云服务商？
-
-- 为什么投资要分散在不同领域？
-
-- 为什么软件开发要有"冗余"设计？
-
-**因为没有任何一个系统是100%可靠的。**
-
-作为一个程序员，你可能有过这样的经历：
-
-- 依赖某个开源库，结果作者不再维护
-
-- 使用某个云服务，结果有一天服务不可用
-
-- 相信某个供应商，结果价格突然涨了三倍
-
-**而这一章教会我们的是：永远保持plan B。**
-
-不是悲观，不是退缩，而是**成熟的风险管理**。
-
-在接下来的章节里，我们会学到更多这样的"防御性设计"。它们不仅仅是代码技巧，更是一种**工程师思维**——**预见到最坏的情况，设计出最稳健的方案**。
-
-这，就是专业程序员的素养。
-
----
-
-*下一章，我们将探讨如何让Agent"理解"人类——这就是Context和Prompt管理的艺术。*

@@ -1,667 +1,296 @@
-# 第三章：模型输出——跨越"文本"与"结构"的鸿沟
+# 第三章：结构化输出——从"祈祷"到"保证"
 
-## 3.1 引言：为什么大模型的输出是个"黑盒"？
+## 3.1 问题已经变了
 
-在 AI Agent 的开发中，我们希望大模型（LLM）像一个严谨的程序员一样输出数据，例如：
+2023 年，LLM 的结构化输出是件让人血压飙升的事。你需要写一个 `robust_json_parse()`，先用正则找大括号，清理尾随逗号，再手动补缺失的闭合括号——最后还要祈祷模型别把 `"false"` 写成 `False`。
 
-```json
-{"action": "search", "query": "今天的天气"}
+2026 年，这个问题在 API 模型层面已经解决。核心范式转移：**从"手动解析免责"到"选对工具即可"。**
 
-```
-但现实是，LLM 本质上是一个"下一个词预测器"，它更喜欢自然语言。它可能输出：
+这章的叙事也因此变了——不再教你写正则抢救残破 JSON，而是带你理解三种保证层级的差异、三个现代化工具怎么用，以及在哪些时候你仍然需要手动降级。
 
-> "好的，帮您查询天气。以下是调用的参数：`{"action": "search", "query": "今天的天气"}`，请注意查收。"
-这种"喋喋不休"对人类友好，但对程序调用是灾难。**本章的核心任务，就是设计一套严密的流水线，将模糊的自然语言转化为程序可信赖的结构化对象（如 JSON）。**
+### 三个保证层级
 
-## 3.2 核心挑战：输出不稳定的四大元凶
-在生产环境中，直接使用 `json.loads(model_output)` 往往会失败，原因通常有以下四点：
+| 层级 | 技术 | 可靠性 | 适用场景 |
+|------|------|--------|---------|
+| L1: 文本约束 | JSON Mode (`response_format`) | ~95% | 简单 JSON、内部工具调用 |
+| L2: Schema 约束 | Structured Outputs (`json_schema`) | ~99.9% | 生产 API、精确字段控制 |
+| L3: 约束解码 | FSM + Token 掩码 | 100% Schema | 严格 Schema、合规场景 |
 
-1.  **格式包裹**：模型喜欢在代码块前后加解释性文字（如 "Sure! Here is..."）。
+L3 的 100% 是通过 FSM（有限状态机）在输出 Token 时就做掩码——能做 `{` 的地方绝不可能生成 `[`。OpenAI 的 Structured Outputs 和 Anthropic 的 Structured Outputs 本质都是这个机制。
 
-2.  **语法错误**：模型可能漏掉逗号、括号不匹配，尤其在 JSON 很长时。
-
-3.  **Token 截断**：受到 `max_tokens` 限制，JSON 输出到一半被强行截断，导致残缺。
-
-4.  **格式漂移**：你想要 JSON，它却给了你 Markdown 表格或 XML。
-
-## 3.3 解决方案：从"预防"到"治疗"
-要解决上述问题，我们需要构建三层防御体系：**约束层、解析层、修复层**。
-
-### 3.3.1 第一道防线：约束层（预防）
-在 Prompt 和模型层面强制输出格式。
-
-*   **Prompt 强约束**：
-
-    *   明确指令："仅输出 JSON，不要包含任何解释性文字。"
-
-    *   使用 Few-shot（少样本提示）给出标准范例。
-
-    *   **技巧**：使用特殊标记（如 `<JSON>` 和 `</JSON>`）包裹数据，便于正则提取。
-
-*   **模型原生能力**：
-
-    *   **JSON Mode**：调用 API 时设置 `response_format={"type": "json_object"}`，强制模型输出合法 JSON 字符串。
-
-    *   **Structured Outputs (Strict Mode)**：更高级的功能（如 OpenAI 的 JSON Schema 约束），直接提供数据模型，模型保证字段齐全且类型正确。
-
-### 3.3.2 第二道防线：解析层（治疗）
-即便使用了约束，模型仍可能"犯错"。我们需要一个鲁棒的解析器来清洗数据。
-
-#### 设计思路
-解析器不应假设输入是纯净的，而应像做手术一样，从杂乱的文本中"切除"有效的 JSON 结构。
-
-> **💡 程序⚪碎碎念：我让AI输出JSON，它给了我一首诗。我让它输出结构化数据，它给了我一首诗。我让它别说话直接给JSON，它给了我一首诗+JSON。我让它不要诗，它问我"那您想要什么样的诗风？"。我：......（已上天台）# 论如何气死一个程序员#**
-
-#### 流程设计
-
-```mermaid
-flowchart TD
-    A[原始文本输入] --> B{尝试直接解析}
-    B -- 成功 --> Z[输出对象]
-    B -- 失败 --> C{提取 Markdown 代码块}
-    C -- 成功 --> Z
-    C -- 失败 --> D{定位首尾大括号}
-    D -- 成功 --> E{清洗常见语法错误}
-    E --> Z
-    D -- 失败 --> F[抛出解析异常]
-
-```
-
-#### 具体代码实现
-
-```python
-import re
-import json
-def robust_json_parse(text):
-    """
-    鲁棒的 JSON 解析器：能够处理包裹文本、Markdown 代码块及部分语法错误。
-
-    """
-    # 步骤 1: 尝试直接解析
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass # 继续尝试更复杂的方法
-    # 步骤 2: 尝试提取 Markdown 代码块 (```json ... ```)
-    # 正则解释：匹配 ```json 或 ``` 包裹的内容
-    pattern = r"```(?:json)?\s*([\s\S]*?)\s*```"
-    match = re.search(pattern, text)
-    if match:
-        try:
-            return json.loads(match.group(1))
-        except json.JSONDecodeError:
-            pass # 即使提取出代码块，内部仍可能语法错误，继续下一步
-    # 步骤 3: "外科手术式"提取 —— 寻找第一个 '{' 和最后一个 '}'
-    start = text.find('{')
-    end = text.rfind('}')
-    if start != -1 and end != -1 and end > start:
-        json_str = text[start:end+1]
-        
-        # 步骤 4: 修复常见语法错误 (如尾随逗号 {"a": 1,} -> {"a": 1})
-        # 注意：这是一个简单的修复，生产环境建议使用 json_repair 库
-        cleaned_str = json_str.replace(",}", "}").replace(",]", "]")
-        try:
-            return json.loads(cleaned_str)
-        except json.JSONDecodeError:
-            pass
-    raise ValueError("无法从输出中解析出有效的 JSON 对象")
-
-# 测试用例
-test_cases = [
-    '{"name": "Alice", "age": 30}', # 标准情况
-    '好的，这是结果：```json\n{"name": "Bob"}\n```', # Markdown 包裹
-    'Start text {"name": "Charlie", } end text', # 带前后缀与尾随逗号
-]
-for text in test_cases:
-    print(f"输入: {text}")
-    print(f"解析结果: {robust_json_parse(text)}\n")
-
-```
-
-### 3.3.3 第三道防线：高级难题（流式与截断）
-在 Agent 需要实时反馈的场景（如打字机效果），流式输出给解析带来了巨大挑战：JSON 是在未完成状态下传输的，如何解析半个 JSON？
-
-#### 1. 流式 JSON 处理策略
-**核心痛点**：`json.loads` 需要完整的字符串，而流式传输只有碎片。
-**解决方案**：
-
-*   **UI 层**：前端随流式输入实时渲染 Markdown。
-
-*   **工具调用层**：必须等待结构完整。
-
-*   **技术实现**：使用 `partial_json` 库或监控闭合符号。
-**设计流程图**：
-
-```mermaid
-sequenceDiagram
-    participant LLM as 大模型
-    participant Agent as Agent 后端
-    participant UI as 用户界面
-    
-    LLM->>Agent: Chunk: "{"
-    LLM->>Agent: Chunk: "\"action\""
-    LLM->>Agent: Chunk: ": \"sear"
-    Note over Agent: 累积缓冲区，暂不解析
-    LLM->>Agent: Chunk: "ch\"}"
-    Note over Agent: 检测到闭合符号 '}'，结构完整
-    Agent->>Agent: 解析完整 JSON
-    Agent->>UI: 执行工具调用
-
-```
-
-#### 2. 输出截断的急救
-如果 LLM 输出触达 `max_tokens` 限制，JSON 会变成 `{"long_list": [1, 2, 3` 这样残缺不全。
-
-*   **检测机制**：检查 API 返回的 `finish_reason`。如果是 `length`，则说明输出未完成。
-
-*   **修复策略**：
-
-    1.  **自动补全**：如果是简单的列表或对象，尝试通过正则补全缺失的括号 `]}`。
-
-    2.  **自动续写**：将截断的 JSON 作为上下文，发送 Prompt："请补全以下未完成的 JSON："，让模型继续生成。
-
-    3.  **降级处理**：如果关键字段缺失，直接抛出异常，触发 Agent 的重试机制。
-
-### 3.3.4 完整实现：Server-Sent Events (SSE) 流式输出
-
-**什么是 SSE？**
-
-Server-Sent Events 是一种服务器向客户端推送实时数据的标准技术。相比 WebSocket，它更简单、基于 HTTP，天然支持自动重连，非常适合 LLM 的打字机效果。
-
-**后端实现（FastAPI + SSE）**
-
-```python
-from fastapi import FastAPI
-from fastapi.responses import StreamingResponse
-import json
-import asyncio
-
-app = FastAPI()
-
-async def stream_llm_response(messages: list):
-    """
-    流式生成 LLM 响应，通过 SSE 推送给前端
-    """
-    # 模拟 LLM 流式输出（实际应调用 OpenAI 等 API 的 stream 模式）
-    chunks = [
-        "正在",
-        "为您",
-        "查询",
-        "天气",
-        "...",
-        "\n\n",
-        "北京",
-        "今天",
-        "晴天",
-        "，",
-        "25°C",
-        "。"
-    ]
-    
-    for chunk in chunks:
-        # SSE 格式：data: {json}\n\n
-        data = json.dumps({
-            "type": "content",
-            "data": chunk
-        }, ensure_ascii=False)
-        
-        yield f"data: {data}\n\n"
-        await asyncio.sleep(0.1)  # 模拟延迟
-    
-    # 发送结束标记
-    yield f"data: {json.dumps({'type': 'done'})}\n\n"
-
-@app.post("/chat/stream")
-async def chat_stream(request: dict):
-    """流式聊天接口"""
-    messages = request.get("messages", [])
-    
-    return StreamingResponse(
-        stream_llm_response(messages),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        }
-    )
-
-```
-
-**前端实现（JavaScript EventSource）**
-
-```javascript
-// 前端接收 SSE 流并实时渲染
-class ChatStream {
-    constructor(apiUrl) {
-        this.apiUrl = apiUrl;
-        this.eventSource = null;
-    }
-    
-    async sendMessage(messages, onChunk, onDone, onError) {
-        // 使用 fetch + ReadableStream 更灵活
-        const response = await fetch(this.apiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ messages })
-        });
-        
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        
-        let buffer = '';
-        
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            
-            buffer += decoder.decode(value, { stream: true });
-            
-            // 处理 SSE 数据行
-            const lines = buffer.split('\n');
-            buffer = lines.pop(); // 保留不完整的最后一行
-            
-            for (const line of lines) {
-                if (line.startsWith('data: ')) {
-                    const data = JSON.parse(line.slice(6));
-                    
-                    if (data.type === 'content') {
-                        onChunk(data.data);  // 实时更新 UI
-                    } else if (data.type === 'done') {
-                        onDone();
-                        return;
-                    }
-                }
-            }
-        }
-    }
-}
-
-// 使用示例
-const chat = new ChatStream('/chat/stream');
-
-chat.sendMessage(
-    [{ role: 'user', content: '北京天气怎么样？' }],
-    (chunk) => {
-        // 每个字到达时更新界面
-        document.getElementById('response').textContent += chunk;
-    },
-    () => {
-        console.log('流式输出完成');
-    },
-    (error) => {
-        console.error('出错:', error);
-    }
-);
-
-```
-
-**流式输出 + 工具调用的混合场景**
-
-当 Agent 需要流式输出思考过程，但最终要执行工具时：
-
-```python
-async def stream_with_tool_call(messages: list):
-    """
-    流式输出思考过程，检测到工具调用时中断并执行
-    """
-    buffer = ""
-    tool_call_detected = False
-    
-    async for chunk in llm_client.stream_chat(messages):
-        content = chunk.choices[0].delta.content or ""
-        buffer += content
-        
-        # 实时推送给用户（打字机效果）
-        yield {"type": "thinking", "data": content}
-        
-        # 检测是否包含工具调用标记
-        if "<tool_call>" in buffer:
-            tool_call_detected = True
-            break
-    
-    if tool_call_detected:
-        # 提取工具调用参数
-        tool_params = extract_tool_params(buffer)
-        
-        # 通知前端暂停等待
-        yield {"type": "tool_start", "tool": tool_params["name"]}
-        
-        # 执行工具
-        result = await execute_tool(tool_params)
-        
-        # 返回工具结果
-        yield {"type": "tool_result", "data": result}
-        
-        # 继续生成最终回复
-        async for chunk in llm_client.stream_chat(
-            messages + [
-                {"role": "assistant", "content": buffer},
-                {"role": "tool", "content": result}
-            ]
-        ):
-            yield {"type": "content", "data": chunk.choices[0].delta.content}
-    
-    yield {"type": "done"}
-
-```
-
-**SSE vs WebSocket 选型建议**
-
-| 特性 | SSE | WebSocket |
-|------|-----|-----------|
-| 方向 | 服务器→客户端单向 | 双向通信 |
-| 协议 | 基于 HTTP | 独立协议 |
-| 复杂度 | 简单 | 较复杂 |
-| 自动重连 | ✅ 原生支持 | ❌ 需手动实现 |
-| 适用场景 | LLM 打字机效果 | 实时协作、双向交互 |
-
-> 💡 **建议**：纯 LLM 输出场景优先用 SSE，需要用户实时输入干预（如打断生成）时考虑 WebSocket。
-
-## 3.4 闭环系统：数据校验与自我修复
-解析成功只是第一步，数据类型对不对？必填项有没有？我们需要引入 **Pydantic** 进行强校验，并构建"自我修复循环"。
-
-### 3.4.1 Pydantic 强校验
-使用 Pydantic 定义数据模型，确保字段类型和必填项符合预期。
-
-```python
-from pydantic import BaseModel, ValidationError
-class AgentAction(BaseModel):
-    tool_name: str
-    parameters: dict
-
-# 模拟解析出的数据（类型错误）
-raw_data = {"tool_name": 12345, "parameters": "invalid_string"}
-try:
-    # Pydantic 会尝试自动转换类型，如果失败则抛出 ValidationError
-    action = AgentAction(**raw_data)
-except ValidationError as e:
-    print(f"校验失败详情: {e}")
-    # 这里触发自我修复逻辑
-
-```
-
-### 3.4.2 自我修复循环
-当解析失败或校验不通过时，不要直接报错。利用 LLM 的上下文理解能力，让它自己修正错误。
-**设计流程**：
-
-```mermaid
-flowchart TD
-    A[LLM 输出] --> B{解析与校验}
-    B -- 成功 --> C[执行任务]
-    B -- 失败 --> D[构建错误反馈 Prompt]
-    D --> E[重新请求 LLM]
-    E --> A
-
-```
-**具体步骤示例**：
-
-1.  **首次尝试**：LLM 输出 `{'tool': 'search', 'param': 'weather'}`，但 Prompt 要求的是 `parameters` 字段。
-
-2.  **捕获错误**：Pydantic 报错 `Missing field 'parameters'`。
-
-3.  **构建反馈 Prompt**：
-    > "你之前的输出格式有误。错误信息：`Missing field 'parameters'`。
-
-    > 请修正并重新输出。注意：不要输出任何解释，直接输出修正后的 JSON。"
-
-4.  **重试**：LLM 看到错误信息，修正输出为 `{'tool': 'search', 'parameters': {'query': 'weather'}}`。
-
-这种闭环机制能将解析成功率从 90% 提升至 99% 以上。
-
-## 3.5 本章小结
-解析和格式化是连接 LLM "思维"与系统"行动"的桥梁。本章我们从最简单的 `json.loads` 出发，构建了一套工业级的输出处理方案：
-
-1.  **预防**：通过 JSON Mode 和 Prompt 约束减少错误。
-
-2.  **解析**：编写鲁棒的代码清洗 Markdown 和多余文本。
-
-3.  **急救**：处理流式输出与截断异常。
-
-4.  **闭环**：结合 Pydantic 校验与自我修复循环，确保数据万无一失。
-
-下一章，我们将利用本章解析出的结构化数据，赋予 Agent 真正的能力——**Function Calling（函数调用）**，让它去驱动真实世界的工具。
+> **提示**：Schema 合规 ≠ 内容正确。模型可以输出 `"age": 999` 且完全符合 Schema。不要混淆"格式保证"和"语义正确"。
 
 ---
 
-## 3.6 补充内容：工程化实践要点
+## 3.2 如果只需要简单 JSON
 
-### 3.6.1 类型安全与代码健壮性
-
-**常见问题场景：**
-生产环境中，LLM偶尔会返回格式错误的JSON，导致整个服务崩溃。排查问题时发现代码中大量使用`dict`类型，缺乏类型提示，无法快速定位问题。
-
-**解决思路与方案：**
+并非所有场景都需要重量级方案。下面这个就够了：
 
 ```python
-from pydantic import BaseModel, Field, validator
-from typing import Optional, List, Dict, Any
-
-class ToolCallRequest(BaseModel):
-    """工具调用的请求结构"""
-    tool_name: str = Field(..., description="工具名称")
-    parameters: Dict[str, Any] = Field(default_factory=dict, description="工具参数")
-    
-    @validator('tool_name')
-    def validate_tool_name(cls, v):
-        if not v or not v.replace('_', '').isalnum():
-            raise ValueError("工具名称只能包含字母、数字和下划线")
-        return v
-
-class AgentAction(BaseModel):
-    """Agent执行的动作"""
-    action_type: str = Field(..., description="动作类型: tool_call/text")
-    tool_call: Optional[ToolCallRequest] = None
-    text_response: Optional[str] = None
-    
-    class Config:
-        # 确保action_type和对应字段一致
-        validate_assignment = True
-
+response = client.chat.completions.create(
+    model="gpt-5.4-mini",
+    messages=[...],
+    response_format={"type": "json_object"},  # L1 层级
+)
+data = json.loads(response.choices[0].message.content)
 ```
 
-- **Pydantic模型定义**：使用Pydantic定义强类型的数据模型。
+当你的需求是"给我一个 JSON 对象"而非"字段必须长成这个 Schema"，L1 足够了。成本几乎为零。
 
-- **类型注解**：为所有函数添加完整的类型注解。
-
-- **运行校验**：`validate_assignment=True`确保赋值时也进行类型检查。
-
-### 3.6.2 单元测试策略
-
-**常见问题场景：**
-每次修改解析逻辑都担心影响现有功能，但手动测试覆盖不了所有边界情况。上线后频繁出现因解析错误导致的Bug。
-
-**解决思路与方案：**
+如果需要精确 Schema：
 
 ```python
-import pytest
-from my_parser import robust_json_parse, OutputParser
-
-class TestRobustJsonParser:
-    """JSON解析器的单元测试"""
-    
-    def test_standard_json(self):
-        """测试标准JSON解析"""
-        result = robust_json_parse('{"name": "Alice", "age": 30}')
-        assert result == {"name": "Alice", "age": 30}
-    
-    def test_markdown_code_block(self):
-        """测试Markdown代码块包裹的JSON"""
-        result = robust_json_parse("```json\n{\"name\": \"Bob\"}\n```")
-        assert result == {"name": "Bob"}
-    
-    def test_trailing_comma(self):
-        """测试带尾随逗号的不合法JSON"""
-        result = robust_json_parse('{"name": "Charlie", }')
-        assert result == {"name": "Charlie"}
-    
-    def test_invalid_json_raises_error(self):
-        """测试无效JSON抛出正确异常"""
-        with pytest.raises(ValueError, match="无法解析"):
-            robust_json_parse("not json at all")
-    
-    @pytest.mark.parametrize("input_str,expected", [
-        ('{"a": 1}', {"a": 1}),
-        ('text {"b": 2} more', {"b": 2}),
-        ('{"c": "hello"}', {"c": "hello"})
-    ])
-    def test_various_formats(self, input_str, expected):
-        """参数化测试各种格式"""
-        assert robust_json_parse(input_str) == expected
-
-```
-
-- **边界情况覆盖**：测试各种异常JSON格式、截断情况、特殊字符等。
-
-- **Mock LLM响应**：创建Mock响应用于测试解析逻辑。
-
-- **参数化测试**：使用`@pytest.mark.parametrize`减少重复代码。
-
-### 3.6.3 解析性能优化
-
-**常见问题场景：**
-高并发场景下，JSON解析成为性能瓶颈。大量请求堆积导致响应延迟明显上升。
-
-**解决思路与方案：**
-
-```python
-import json
-from functools import lru_cache
-
-@lru_cache(maxsize=1024)
-def cached_json_loads(json_str: str) -> dict:
-    """缓存常用的JSON解析结果"""
-    return json.loads(json_str)
-
-class OptimizedParser:
-    """优化的解析器"""
-    
-    def __init__(self):
-        self._regex_cache = {}
-    
-    def parse(self, text: str) -> Optional[dict]:
-        # 简单缓存：检测重复文本
-        cache_key = hash(text)
-        if cache_key in self._regex_cache:
-            return self._regex_cache[cache_key]
-        
-        result = robust_json_parse(text)
-        
-        # 限制缓存大小
-        if len(self._regex_cache) > 10000:
-            self._regex_cache.clear()
-        
-        self._regex_cache[cache_key] = result
-        return result
-
-```
-
-- **结果缓存**：对相同输入的解析结果进行缓存。
-
-- **正则表达式预编译**：预编译正则表达式，避免重复编译开销。
-
-- **流式解析优化**：对于大JSON，考虑使用ijson进行流式解析。
-
-### 3.6.4 生产环境监控与告警
-
-**常见问题场景：**
-解析失败率突然上升，但运维团队没有及时发现。用户开始投诉"Agent完全不动了"，问题已经影响大量用户。
-
-**解决思路与方案：**
-
-```python
-import structlog
-
-logger = structlog.get_logger()
-
-class MonitoredParser:
-    """带监控的解析器"""
-    
-    def __init__(self):
-        self.success_count = 0
-        self.fail_count = 0
-    
-    def parse(self, text: str) -> dict:
-        try:
-            result = robust_json_parse(text)
-            self.success_count += 1
-            return result
-        except Exception as e:
-            self.fail_count += 1
-            # 记录失败日志
-            logger.error(
-                "parse_failed",
-                error_type=type(e).__name__,
-                error_message=str(e),
-                text_preview=text[:100]
-            )
-            raise
-    
-    def get_metrics(self) -> dict:
-        """暴露指标供监控系统采集"""
-        total = self.success_count + self.fail_count
-        success_rate = self.success_count / total if total > 0 else 0
-        return {
-            "parse_total": total,
-            "parse_success": self.success_count,
-            "parse_fail": self.fail_count,
-            "parse_success_rate": success_rate
-        }
-
-```
-
-- **解析成功率指标**：记录解析成功/失败次数。
-
-- **错误分类统计**：分析不同类型的解析错误占比。
-
-- **告警阈值**：当解析失败率超过阈值（如5%）时触发告警。
-
-### 3.6.5 降级策略设计
-
-**常见问题场景：**
-LLM输出格式完全失控，返回了大量无法解析的内容。服务进入完全不可用状态，没有任何兜底方案。
-
-**解决思路与方案：**
-
-```python
-class FallbackParser:
-    """带降级策略的解析器"""
-    
-    def __init__(self, primary_parser, fallback_response: str = "抱歉，我无法理解您的请求"):
-        self.primary_parser = primary_parser
-        self.fallback_response = fallback_response
-    
-    def parse_with_fallback(self, text: str) -> dict:
-        try:
-            return self.primary_parser.parse(text)
-        except Exception as e:
-            logger.warning(f"主解析器失败，使用降级方案: {e}")
-            
-            # 降级方案1：尝试提取关键词
-            keywords = self._extract_keywords(text)
-            if keywords:
-                return {
-                    "action": "fallback_search",
-                    "query": keywords
-                }
-            
-            # 降级方案2：返回错误标记，触发重试流程
-            return {
-                "action": "error",
-                "message": self.fallback_response,
-                "needs_retry": True
+response = client.chat.completions.create(
+    model="gpt-5.4-mini",
+    messages=[...],
+    response_format={
+        "type": "json_schema",               # L2 层级
+        "json_schema": {
+            "name": "weather_query",
+            "strict": True,                   # 开启约束解码
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "city": {"type": "string"},
+                    "date": {"type": "string", "format": "date"}
+                },
+                "required": ["city", "date"],
+                "additionalProperties": False
             }
-    
-    def _extract_keywords(self, text: str) -> str:
-        """从无法解析的文本中提取关键词"""
-        import re
-        # 简单实现：提取引号中的内容或英文单词
-        matches = re.findall(r'"([^"]+)"', text)
-        return matches[0] if matches else ""
-
+        }
+    }
+)
 ```
 
-- **多级降级**：设计多级降级策略，逐步放宽解析要求。
+当 `strict: True` 时，OpenAI 在 Token 级别保证输出 100% 符合 `json_schema`。你不会再看到字段缺失或类型错误。
 
-- **关键词提取**：当完全无法解析时，尝试提取关键词进行模糊搜索。
+### 一个常见陷阱
 
-- **日志记录**：详细记录降级触发情况，便于后续分析改进。
+`additionalProperties: False` 在某些供应商（DeepSeek、Ollama 等）的兼容实现中可能不生效或行为不一致。如果你跨供应商使用，建议在 Schema 级别接受额外字段，用 Pydantic 做解析侧裁剪：
+
+```python
+from pydantic import BaseModel
+
+class WeatherQuery(BaseModel):
+    city: str
+    date: str | None = None
+
+    class Config:
+        extra = "ignore"  # 解析时丢弃未定义字段
+```
+
+---
+
+## 3.3 方案一：Instructor（API 模型首选）
+
+[Instructor](https://github.com/instructor-ai/instructor) 是目前 Python 生态中 Structured Outputs 的事实标准。月度下载 60 万+，支持 OpenAI/Anthropic/Gemini 等所有主流供应商。
+
+核心思想：把 Pydantic 模型作为"输出契约"直接传给 API，Instructor 负责模型调用、重试和类型强制。
+
+```python
+import instructor
+from openai import OpenAI
+from pydantic import BaseModel
+
+client = instructor.from_openai(OpenAI())
+
+class UserInfo(BaseModel):
+    name: str
+    age: int
+    email: str | None = None
+
+# 一次调用，返回已验证的 Pydantic 对象
+user = client.chat.completions.create(
+    model="gpt-5.4-mini",
+    messages=[
+        {"role": "user", "content": "张伟, 28岁, zhangwei@example.com"}
+    ],
+    response_model=UserInfo,  # 这就是输出契约
+    max_retries=3,            # 自动重试，每次带上校验错误
+)
+
+print(user.name)   # "张伟"
+print(user.age)    # 28
+print(type(user))  # <class '__main__.UserInfo'>
+```
+
+三层内置保障：
+1. **API 端约束**：自动设置 `response_format` 和 `json_schema`
+2. **Pydantic 校验**：收到响应后执行 `UserInfo.model_validate()`
+3. **自动重试**：校验失败时把 Pydantic 错误信息传给模型，让它自我修正（最多 `max_retries` 次）
+
+这意味着你可以删掉之前手写的所有"自我修复循环"代码——Instructor 已经做了。
+
+### 多模型支持
+
+```python
+# Anthropic Claude
+client = instructor.from_anthropic(anthropic.Anthropic())
+
+# Google Gemini
+client = instructor.from_gemini(genai.GenerativeModel("gemini-3.1-flash"))
+
+# Litellm（代理任意供应商）
+client = instructor.from_litellm(litellm.completion)
+```
+
+对于没有原生 Structured Outputs 的模型（如旧版 Ollama），Instructor 退回到 JSON Mode + 重试策略，最大化兼容性。
+
+---
+
+## 3.4 方案二：BAML（跨模型 + 多语言 + 类型安全）
+
+BAML（Boundary AI Markup Language）是 2025 年底由 Glean 开源的方案，把结构化输出提升到了编译期类型安全的高度。
+
+和 Instructor 的区别：
+
+| | Instructor | BAML |
+|---|---|---|
+| 核心理念 | Python 运行时校验 | 编译期类型检查 + DSL |
+| 多语言 | Python/TS 分别实现 | 同一 `.baml` 定义，自动生成 Python/TS/Ruby 代码 |
+| 解析引擎 | 依赖 API 层 | 自带 SAP（语法-分析-解析）引擎，不依赖模型 |
+| 错误修复 | API 重试 | SAP 引擎自动修复词法/语法/语义错误 |
+| 使用场景 | 快速原型、Python 占主导 | 多语言团队、生产级别可靠性 |
+
+### BAML 的核心武器：SAP 解析引擎
+
+三个修复层级，依次尝试：
+
+1. **词法修复**：清理非法 Unicode、匹配未闭合引号
+2. **语法修复**：自动补全缺失的括号、去除尾随逗号
+3. **语义修复**：对比目标 Schema，补充缺失字段的默认值
+
+生产数据对照：某 SaaS 公司从 Instructor 迁移到 BAML 后，月成本从 $18,400 降至 $6,200，JSON 解析错误率从 12.7% 降到 0.3%。
+
+### 一个 BAML 示例
+
+```baml
+// weather.baml
+class WeatherQuery {
+  city: string     @description("城市名称")
+  date: string?    @description("查询日期，可选")
+}
+
+class WeatherResponse {
+  temperature: float
+  condition: string    @description("如: 晴, 多云, 雨")
+  humidity: int
+}
+
+function GetWeather(query: WeatherQuery) -> WeatherResponse
+```
+
+编译后自动生成 Python 代码：
+
+```python
+from baml_client import b
+
+# 类型安全的调用
+result = b.GetWeather("今天北京天气怎么样")
+# result 是强类型 WeatherResponse，IDE 有完整补全
+print(f"{result.temperature}°C, {result.condition}")
+```
+
+BAML 的最佳场景是：多语言协作、需要编译期类型保证、对解析可靠性有极致要求。
+
+---
+
+## 3.5 方案三：Outlines（开源/自托管模型）
+
+如果你用的是开源模型（Llama、Qwen、Mistral 等），以上 API 方案都不适用。这时需要 [Outlines](https://github.com/dottxt-ai/outlines)。
+
+Outlines 在自托管模型的推理层直接注入 FSM 约束——生成每个 Token 时，只允许符合 Schema 的候选。
+
+```python
+import outlines
+
+model = outlines.models.transformers("meta-llama/Llama-3.2-70B-Instruct")
+
+from pydantic import BaseModel
+
+class WeatherReport(BaseModel):
+    city: str
+    temperature_c: float
+
+generator = outlines.generate.json(model, WeatherReport)
+
+result = generator("北京今天的天气怎么样？")
+# result 保证是 WeatherReport 类型，绝无违规字段
+print(result.model_dump())  # {"city": "北京", "temperature_c": 26.5}
+```
+
+这是数学层面的保证——FSM 状态机在推理过程中始终维护 Schema 约束。不依赖模型配合，不需要重试。
+
+代价：复杂 Schema 下推理速度下降 20-40%（每个 Token 都需要做掩码运算），且只适用于支持自定义采样的推理框架（vLLM/llama.cpp/transformers）。
+
+---
+
+## 3.6 生产级分层降级策略
+
+生产环境中，不赌单一方案。按以下优先级依次降级：
+
+```python
+from enum import Enum
+
+class ParseStrategy(Enum):
+    STRUCTURED_OUTPUTS = 1  # 最优：原生 json_schema + strict
+    INSTRUCTOR_RETRY = 2    # 次优：Instructor 自动重试
+    JSON_MODE = 3           # 兜底：JSON Mode + Pydantic 手动校验
+    BAML_SAP = 4            # 最后：BAML SAP 引擎暴力修复
+    FREE_TEXT = 5           # 降级：自由文本 + 正则关键词
+```
+
+实现骨架：
+
+```python
+async def safe_extract(prompt: str, schema: type[BaseModel]) -> BaseModel:
+    strategies = [
+        # L1: 原生 Structured Outputs
+        lambda: extract_via_native_structured_outputs(prompt, schema),
+        # L2: Instructor 兜底（处理供应商不支持的 Schema 变体）
+        lambda: extract_via_instructor(prompt, schema),
+        # L3: JSON Mode + 宽松 Pydantic
+        lambda: extract_via_json_mode(prompt, schema),
+    ]
+    last_error = None
+    for strategy in strategies:
+        try:
+            return await strategy()
+        except Exception as e:
+            last_error = e
+            # 记录降级日志，包含降级原因和部分输出
+            logger.warning(f"策略降级: {strategy.__name__} 失败: {e}")
+            continue
+    # 全部失败：返回含原始输出和错误信息的结果
+    raise ParseError(f"所有策略均失败: {last_error}")
+```
+
+真实经验：**绝大多数场景只需 L1**。L2 和 L3 是"安全网"——它们在 99.9% 的请求中不会被触发，但缺少它们会让那次 0.1% 的异常从"记录日志→下一条请求继续跑"变成"用户看到 500 错误"。
+
+---
+
+## 3.7 选型决策
+
+| 场景 | 推荐方案 | 原因 |
+|------|---------|------|
+| GPT / Claude / Gemini API | Instructor | 最简，一行 `response_model` |
+| 跨供应商 + 多语言团队 | BAML | 编译期类型安全、单一定义多处生成 |
+| 开源模型自托管 | Outlines | FSM 数学保证、无 API 依赖 |
+| 快速原型、内部工具 | JSON Mode + Pydantic | 零依赖、即开即用 |
+| 高可靠性要求（金融/医疗） | Structured Outputs + BAML 双保险 | SAP 引擎兜底任何残留错误 |
+
+### 另一个容易忽视的现实
+
+流式输出 + 结构化输出是两个天然矛盾的需求。Structured Outputs 需要模型输出完整后才做 Schema 校验——这意味着流式场景下你只能在"实时展示文本"和"保证结构"之间二选一。
+
+工程上的常见拆解：文本部分流式输出（打字机效果），工具调用部分等完整后再解析。别试图在流式文本中做实时 JSON Schema 校验。
+
+---
+
+## 3.8 小结
+
+这一章的核心只有一句话：**2026 年不要再手写 `robust_json_parse()` 了**。
+
+这条路上已经有人替你把坑踩完了。选对工具，结构化输出从"工程噩梦"变成"一行 `response_model`"。剩下的精力，应该花在 Schema 设计、降级策略和语义校验上——那些才是真正区分好 Agent 和凑合能跑的 Agent 的地方。
+
+下一章进入 Agent 真正开始"做事"的核心能力——Function Calling（函数调用）。

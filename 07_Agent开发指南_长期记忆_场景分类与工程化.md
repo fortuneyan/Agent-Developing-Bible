@@ -1,497 +1,209 @@
-# 第七章：长期记忆的场景分类与工程化落地
+# 第七章：长期记忆——Write、Manage、Read
 
-本章突破"向量检索万能"的误区，将长期记忆场景分为四类：静态用户画像（知识图谱方案）、动态项目状态（快照+摘要方案）、行为纠偏（高权重规则库）、时间线索（时序索引+元数据过滤）。提供混合存储架构设计，实现精准高效的记忆检索。
+本章从认知科学的四层记忆模型出发，引入 2026 年的 **Write-Manage-Read** 工程框架。核心观点：长期记忆的瓶颈不在"写入"和"检索"，而在"维护"——记忆衰减、矛盾消解、过期清理，这些才是生产环境真正杀人的问题。
 
-## 7.1 引言：为什么"向量检索"不是万能药？
+## 7.1 引言：记忆不是 RAG 的附庸
 
-在 Agent 开发的初级阶段，许多开发者会陷入一个误区：试图用"向量数据库 + 语义检索"解决所有记忆问题。然而，在实际的工程落地中，长期记忆（LTM）并非只有一种形态。
+一个反直觉的发现：arXiv 2603.07670 论文对 19 个主流记忆项目做了系统评测，结论是 **"有记忆 vs 无记忆"的差距，远大于"GPT-4 vs GPT-5"的差距**。换句话说，一个搭载中等模型的优秀记忆系统，可以超过一个搭载旗舰模型但没有记忆的系统。
 
-如果仅仅笼统地使用向量检索，往往会遭遇以下"幽灵问题"：
+但大多数团队对待长期记忆的方式是：接个向量数据库，把对话往里扔，检索时调 top_k，就完了。
 
-1.  **精准度缺失**：用户问"上周三我买了什么？"，向量检索可能召回了"上个月买书"的记录，因为它们语义相似，却忽略了时间维度的硬性约束。
+这套方案在生产中不出三个月就会炸——不是你炸，是用户体验炸。Agent 开始"记得"四个月前用户随口说的东西，却忘了昨天刚改的偏好。向量相似度 0.92 召回的是"我喜欢吃苹果"，而"我搬到上海了"因为语义距离稍大被埋在第 7 位。
 
-2.  **状态错乱**：用户昨天说"我不用 MySQL 了，改用 PostgreSQL"，系统却因为两条记忆向量距离相近，同时召回了新旧两条决策，导致 Agent 困惑。
-
-3.  **权重倒置**：用户强调"千万不要给我推荐书籍"，这条指令在向量空间中可能和"我喜欢看书"混在一起，导致关键指令被淹没。
-
-**核心观点**：不同的业务场景对记忆的**时效性、精度、关联性**要求截然不同。我们需要构建一个**多级记忆管理系统**，对症下药。
+**核心观点**：长期记忆是一项独立工程，不是 RAG 的"顺便做一下"。它需要自己的架构、自己的生命周期、自己的评估体系。
 
 ---
 
-## 7.2 场景分类矩阵：长期记忆的四种"面孔"
+## 7.2 认知科学视角：四层记忆模型
 
-我们将长期记忆的应用场景划分为四个主要象限，这是设计记忆系统的第一步。
+2026 年的共识是把长期记忆划分为四个认知层（arXiv 2603.07670）。这不是学术概念，而是直接影响你的存储选型和检索策略的工程分类：
 
-| 场景类型 | 典型案例 | 核心痛点 | 推荐解决方案 |
-| :--- | :--- | :--- | :--- |
-| **静态用户画像** | "我是素食主义者"、"我是Java后端" | 数据分散，需去重与冲突解决 | **知识图谱 / 结构化标签库** |
-| **动态项目状态** | "上次会议决定使用AWS"、"重构进行中" | 状态具有时效性，旧数据即噪音 | **状态机 + 摘要更新** |
-| **行为纠偏** | "不要在代码里加注释"、"回答要简洁" | 负向反馈需永久记住，优先级最高 | **高权重规则库** |
-| **时间线索** | "上周三买了什么？"、"过去一年的变化" | 向量检索难以处理精确时间范围 | **时序索引 + 元数据过滤** |
+| 记忆类型 | 是什么 | 示例 | 存储方案 | 更新策略 |
+|:---|:---|:---|:---|:---|
+| **程序记忆** | 怎么做事的规则 | "不要加注释""用中文回答" | YAML/TOML 配置文件 + Git 版本控制 | 手动编辑，纳入 PR 审核 |
+| **语义记忆** | 关于用户的事实 | "我是素食者""住在上海" | 结构化数据库（主键唯一） | 覆盖写入，冲突自动解决 |
+| **情景记忆** | 发生过的事件 | "上周三讨论决定用 AWS" | 向量数据库 + 时间索引 | 摘要压缩，过期清理 |
+| **工作记忆** | 当前会话上下文 | "用户刚打开了 login.py" | 应用内存（无需持久化） | 会话结束即释放 |
 
----
-
-## 7.3 场景一：静态用户画像——"我是谁"
-
-### 7.3.1 场景与痛点分析
-
-用户的基本属性（如职业、住址、过敏源）属于**低频变动、高复用**的数据。
-
-- **痛点**：用户可能在不同对话中多次提及偏好，甚至前后矛盾（如："我刚从北京搬到上海"）。单纯依赖向量检索，可能只召回"我喜欢吃苹果"，漏掉"我不喜欢吃梨"，导致推荐错误。
-
-### 7.3.2 架构设计思路
-
-**设计核心**：将非结构化对话转化为结构化数据，利用数据库的"主键唯一性"解决冲突。
-
-### 7.3.3 详细实施步骤
-
-**步骤 1：实体抽取（ETL）**
-
-利用 LLM 从对话流中提取结构化三元组 `(Subject, Predicate, Object)`。
-
-**步骤 2：冲突检测与融合**
-
-检测新提取的事实是否与已有事实冲突。若冲突，新值覆盖旧值。
-
-**步骤 3：全量注入**
-
-会话开始时，将结构化画像直接拼接到 System Prompt。
-
-### 7.3.4 代码与流程图示例
-
-**设计示例：LLM 提取 Prompt 模板**
-
-```text
-你是一个信息提取助手。请从用户的输入中提取用户画像三元组。
-
-输入："我现在住在上海，但我以前住北京。"
-输出：
-[
-  {"attr": "location", "value": "Shanghai", "confidence": 1.0},
-  {"attr": "previous_location", "value": "Beijing", "confidence": 1.0}
-]
-```
-
-**流程图：用户画像更新流程**
-
-```mermaid
-graph TD
-    A[用户输入: 我刚搬到上海] --> B[LLM 实体抽取]
-    B --> C{提取三元组: live_in=Shanghai}
-    C --> D{数据库中是否存在 live_in?}
-    D -- 存在且值为 Beijing --> E[执行 Update 操作]
-    D -- 不存在 --> F[执行 Insert 操作]
-    E --> G[数据库状态: live_in=Shanghai]
-    F --> G
-    G --> H[下次对话时全量加载至 Prompt]
-```
+**关键区别**：不是所有记忆都该进向量数据库。程序记忆（规则/约束）该进 Git，语义记忆（事实）该进关系型数据库，情景记忆（事件）才进向量数据库。混在一起存储 = 什么都搜得到 = 什么都搜不准。
 
 ---
 
-## 7.4 场景二：动态项目状态——"我在做什么"
+## 7.3 Write-Manage-Read 工程框架
 
-### 7.4.1 场景与痛点分析
+这是 arXiv 2603.07670 提出的核心框架，替代了之前业界默认的"存进去→搜出来"两步模型。**Manage（维护）阶段被独立出来，因为它是整个系统最大的瓶颈。**
 
-Agent 协助用户处理长周期任务（如写代码、写小说）。记忆的核心是**"当前状态"**，而非"历史日志"。
-
-- **痛点**：如果记忆库里存着"决定使用 MySQL"，但昨天已改用 PostgreSQL，旧记忆就是干扰噪音。
-
-### 7.4.2 架构设计思路
-
-**设计核心**：采用"快照 + 增量"模式。不保存每一句对话，只维护一个最新的 `Project State` JSON 对象。
-
-### 7.4.3 详细实施步骤
-
-**步骤 1：状态初始化**
-
-创建项目时，生成初始状态 JSON。
-
-**步骤 2：增量更新监测**
-
-每次对话结束时，LLM 判断对话内容是否触发了状态变更。
-
-**步骤 3：状态重写**
-
-若有变更，生成新的状态 JSON 覆盖旧文件。
-
-### 7.4.4 代码示例
-
-**设计示例：项目状态对象结构**
-
-```json
-{
-  "project_id": "proj_001",
-  "name": "Login Module Refactor",
-  "status": "In Progress",
-  "tech_stack": ["Python", "FastAPI", "PostgreSQL"],
-  "current_step": "Writing API tests",
-  "last_updated": "2023-10-27T10:00:00Z"
-}
+```
+[触发事件] → [Write: 提取 + 分类 + 写入]
+                   ↓
+              [Manage: 去重 + 矛盾消解 + 衰减 + 过期]
+                   ↓
+              [Read: 多路召回 + 重排序 + 注入 Prompt]
 ```
 
-**实现逻辑**：
+### Write：不是"存原文"，是"结构化提取"
+
+存入原始对话是最省事的做法，也是最糟糕的做法。正确的 Write 分三步：
+
+1. **触发判**：不是每一句对话都值得存。用轻量规则过滤掉"好的""嗯""谢谢"。
+2. **分类**：判断这段信息属于程序/语义/情景/工作记忆中的哪一类。
+3. **结构化**：提取为结构化对象，而非原文。`{"attr": "diet", "value": "vegetarian", "source": "2026-07-02-对话-045"}` 而不是 `"用户说他是素食主义者"`。
+
+### Manage：为什么这是最大的瓶颈
+
+LongMemEval 基准测试的数据很残酷：各方案的 F1 得分差距高达 75%。差距不在检索，在维护。
+
+三个核心难题：
+
+1. **矛盾消解**：用户今天说"用 React"，三个月前说"用 Vue"。系统必须知道 React 是更新的、优先级更高的信息，不是把两条都给 LLM。
+2. **记忆衰减**：OpenMemory 项目引入了认知衰退模型——根据访问频率和最近访问时间，动态调整记忆的权重。三个月没被访问过的偏好，自然衰减，不应该和新记忆平起平坐。
+3. **过期清理**：情景记忆（"上周买了个鼠标"）的价值随时间指数下降。30 天后，这条记忆占用的存储和检索带宽都不值得。
+
+### Read：多路召回 + 重排序
+
+单一向量检索的召回率在复杂场景下只有 60-70%。生产系统需要多路并行：
+
+1. **语义路**：向量相似度检索（处理"素食"和"不吃肉"的语义匹配）
+2. **时效路**：时间范围 + 最近优先（处理"上周三"的精确时间约束）
+3. **权威路**：程序记忆直接注入（规则/约束不走检索，百分百注入）
+
+三路结果合并，用 Cross-Encoder 重排序（而非只用 Bi-Encoder 的 cosine 分数），取 top-10。
+
+---
+
+## 7.4 四大业务场景速览
+
+虽然底层模型是四层认知分类，但面向具体业务，以下四种场景模式值得记住。这里不展开代码，因为现代框架已经封装好了这些逻辑。
+
+| 场景 | 对应记忆层 | 核心操作 | 正确做法 |
+|:---|:---|:---|:---|
+| **用户画像** | 语义记忆 | 事实提取 → 冲突检测 → 覆盖写入 | 结构化存储为主键，新值覆盖旧值 |
+| **项目状态** | 情景记忆 | 快照 + 增量更新 | 只维护最新状态 JSON，不保留全量历史 |
+| **行为纠偏** | 程序记忆 | 规则提取 → 强制注入 | Memory as Code，纳入 Git 管理，置于 System Prompt 顶部 |
+| **时间查询** | 情景记忆 | 时间解析 → 预过滤 → 语义匹配 | 先按时间范围过滤，再做向量检索 |
+
+---
+
+## 7.5 不要自己造轮子：四大框架选型
+
+2026 年，长期记忆已经不是需要从零搭建的工程了。以下是四个主流框架的选型指南：
+
+| 框架 | Stars | 核心思路 | 最适合 | 注意点 |
+|:---|:---|:---|:---|:---|
+| **Mem0** | 48K | 多层记忆（用户/会话/Agent）+ 自动矛盾消解 | 需要快速接入的用户级记忆 | 云服务依赖，自定义策略受限 |
+| **Letta (MemGPT)** | 21K | 操作系统类比——记忆分"主存"和"磁盘"，自动换入换出 | 需要复杂记忆调度的高级 Agent | 学习曲线陡，完全自托管 |
+| **LangMem** | LangChain 生态 | 与 LangGraph 深度集成，语义记忆 + 程序记忆双重 API | 已在用 LangChain/LangGraph 的项目 | 生态绑定，脱离 LangChain 拆不出来 |
+| **Memobase** | 新兴 | 用户画像为中心，长短期记忆混合检索 | 个性化推荐/用户画像场景 | 生态较新，社区资源少 |
+
+### 选型决策树
+
+```
+你已经在用 LangChain/LangGraph 了吗？
+├── 是 → 直接上 LangMem，零迁移成本
+└── 否 → 你的核心需求是什么？
+    ├── 用户级记忆，3 天上线 → Mem0
+    ├── Agent 需要复杂的记忆调度（主存/磁盘切换）→ Letta
+    └── 个性化画像 + 推荐 → Memobase
+```
+
+---
+
+## 7.6 Manage 阶段的工程实操
+
+### 记忆衰减
+
+不需要复杂的公式。一个实用的简化版：
+
+```
+memory_weight = base_weight × (1 / (1 + days_since_last_access / 30))
+```
+
+30 天未访问，权重降为 0.5；90 天未访问，降为 0.25。检索时 `final_score = similarity × memory_weight`。
+
+### 矛盾消解
+
+Mem0 的做法值得借鉴：当新记忆覆盖同一属性时，不删除旧记忆，而是在元数据中标记 `{"deprecated": true, "deprecated_by": "mem_045"}`。这样既保证了当前检索的准确性，又保留了历史可追溯。
+
+### 生命周期
+
+| 记忆类型 | 保留策略 | 典型周期 |
+|:---|:---|:---|
+| 程序记忆 | 永久保留，纳入 Git | — |
+| 语义记忆（画像） | 永久保留，覆盖更新 | — |
+| 语义记忆（偏好） | 按衰减自动淘汰 | ~90 天未访问 |
+| 情景记忆（重要事件） | 摘要压缩，原始日志归档 | 摘要 180 天，日志 30 天 |
+| 情景记忆（日常对话） | 定期过期 | 7-14 天 |
+
+---
+
+## 7.7 五个设计张力
+
+arXiv 论文指出了所有记忆架构都必须取舍的五组矛盾。没有银弹，只有 trade-off：
+
+1. **精确 vs 召回**：想不漏（高召回）就得接受更多噪音（低精确）。Mem0 选择偏向精确，Letta 选择偏向召回。你的产品是"宁可漏掉也不该记错"（医疗/金融）还是"宁可多记也不能漏"（社交/娱乐）？
+
+2. **实时更新 vs 批量处理**：每次对话结束立刻更新记忆，延迟低但成本高（每次都要调 LLM）。每小时批量处理，成本低但用户在那一小时内得不到最新记忆。大多数场景选准实时——对话结束后 5 秒内触发，异步处理。
+
+3. **集中存储 vs 分布式**：单一记忆库统一管理 vs 每个 Agent 独立记忆。集中式适合用户画像跨场景复用，分布式适合 Agent 职责完全独立。
+
+4. **结构化 vs 灵活**：Schema 严格（画像用关系型数据库）vs Schema 自由（日志用向量数据库）。折中方案：核心属性走严格 Schema，辅助信息走灵活存储。
+
+5. **透明 vs 隐私**：记忆越详细，Agent 越个性化，但用户隐私风险越大。需要"记忆可见性"面板——让用户看到 Agent 记住了什么，可以手动删除或修正。
+
+---
+
+## 7.8 从零搭建的最小可行架构
+
+如果你不能或不想用 Mem0 等框架，这是一个 50 行能跑起来的骨架：
 
 ```python
-# 伪代码示例
-def update_project_state(chat_history, current_state):
-    prompt = f"""
-    当前项目状态: {current_state}
-    最近对话历史: {chat_history}
-    
-    请判断对话是否有新信息更新了项目状态？如果有，请输出完整的新状态 JSON；如果没有，输出 None。
-
-    """
-    new_state = llm.call(prompt)
-    if new_state:
-        db.save("proj_001", new_state)
-```
-
----
-
-## 7.5 场景三：行为纠偏——"我不要什么"
-
-### 7.5.1 场景与痛点分析
-
-这是权重最高的记忆。用户对 Agent 的纠正（如"不要解释代码，直接给我结果"），属于**强制性指令**。
-
-- **痛点**：普通的记忆检索可能认为"天气"和"纠错"相似度一样，导致纠错指令被淹没。用户纠正后，Agent 应立即在后续所有对话中遵守。
-
-### 7.5.2 架构设计思路
-
-**设计核心**：建立独立的"规则/约束库"，并在 Prompt 构建时给予最高优先级，标记为 `[CRITICAL]`。
-
-### 7.5.3 详细实施步骤
-
-**步骤 1：意图识别**
-
-识别用户输入是"闲聊"还是"纠偏指令"。
-
-**步骤 2：规则固化**
-
-将自然语言纠正转化为一条明确的指令规则，写入规则库。
-
-**步骤 3：强制注入**
-
-构建 System Prompt 时，规则库内容置于最顶端。
-
-### 7.5.4 Prompt 构建示例
-
-**设计内容**：最终生成的 System Prompt 结构
-
-```text
-[CRITICAL CONSTRAINTS - HIGHEST PRIORITY]
-
-1. Output format: Paragraphs only, no bullet points.
-2. Action: Do not recommend books under any circumstances.
-
----------------------------------------------------------
-[User Profile]
-
-- Location: Shanghai
-- Role: Senior Developer
-
----------------------------------------------------------
-[Current Context]
-...
-```
-
----
-
-## 7.6 场景四：时间线索——"什么时候"
-
-### 7.6.1 场景与痛点分析
-
-用户查询具体时间点发生的事件（如"上周三我说要去哪出差？"）。
-
-- **痛点**：向量擅长语义匹配，不擅长数值/时间范围过滤。查询"上周"，向量可能召回"上个月"的相关内容，因为语义都是"过去"。
-
-### 7.6.2 架构设计思路
-
-**设计核心**：向量数据库必须结合**元数据过滤**。先过滤时间范围，再做向量匹配。
-
-### 7.6.3 详细实施步骤
-
-**步骤 1：数据写入**
-
-写入记忆时，必须附带精确的 `created_at` 时间戳元数据。
-
-**步骤 2：时间解析**
-
-查询时，先用 LLM 或 NLP 工具将"上周三"解析为具体的日期范围（如 `2023-10-18` 至 `2023-10-18`）。
-
-**步骤 3：混合检索**
-
-执行 `Pre-filtering`：先在数据库层面筛选出符合时间范围的文档，再在这些文档中进行向量相似度计算。
-
-### 7.6.4 流程图
-
-```mermaid
-graph LR
-    A[用户查询: 上周三买了什么?] --> B[时间解析器]
-    B --> C{转换日期范围: 10.18 - 10.18}
-    C --> D[向量数据库]
-    D --> E[预过滤: WHERE date = '10.18']
-    E --> F[语义匹配: '买了什么' ~ '购买物品']
-    F --> G[返回精确结果]
-```
-
----
-
-## 7.7 总结：统一架构视图
-
-为了支撑上述所有场景，我们不能依赖单一存储，而需要构建一个**混合存储架构**。
-
-### 7.7.1 系统架构图
-
-```mermaid
-graph TD
-    UserInput[用户输入] --> Router{记忆路由网关};
-
-    Router -- "偏好/画像类" --> ProfileDB[(结构化画像库)];
-    Router -- "任务进度类" --> StateDB[(状态摘要库)];
-    Router -- "指令纠错类" --> RuleDB[(规则约束库)];
-    Router -- "历史回忆类" --> VectorDB[(向量数据库)];
-
-    ProfileDB -- "Key-Value 读取" --> ContextBuilder[上下文构建器];
-    StateDB -- "Project ID 索引" --> ContextBuilder;
-    RuleDB -- "高优先级加载" --> ContextBuilder;
-    VectorDB -- "混合检索 (时间+语义)" --> ContextBuilder;
-
-    ContextBuilder --> LLM[大模型推理];
-```
-
-### 7.7.2 关键要点总结
-
-1. **不要试图用一种存储解决所有问题**：
-   - 结构化数据（画像）用 MongoDB/图数据库。
-   - 非结构化回忆（历史）用向量数据库。
-   - 强约束（规则）用内存或高性能 KV 缓存。
-
-2. **写入比检索更重要**：
-   - 如果不对记忆进行清洗、提炼和分类存储，检索出来的只能是噪音。
-   - 数据进入数据库前，必须经过 ETL（抽取、转换、加载）。
-
-3. **时效性处理原则**：
-   - 静态数据（画像）：长期存储，覆盖更新。
-   - 动态数据（状态）：最新覆盖，历史归档。
-   - 历史数据（日志）：时间索引，定期过期。
-
----
-
-**本章完毕。通过本章的学习，您应该掌握了如何根据业务场景选择合适的记忆存储策略，并能够设计出一个能够处理复杂真实业务需求的 Agent 记忆系统。**
-
----
-
-## 7.8 补充内容：工程化实践要点
-
-### 7.8.1 向量数据库选型与集成
-
-**常见问题场景：**
-
-选择向量数据库时，面对 Chroma、Milvus、Pinecone、Weaviate 等多个选项，不知道哪个适合当前业务场景。
-
-**解决思路与方案：**
-
-| 数据库 | 适用场景 | 部署方式 | 特点 |
-| :--- | :--- | :--- | :--- |
-| **Chroma** | 本地 Demo、快速验证 | 嵌入式，无需独立服务 | 零门槛，`pip install chromadb` 即用 |
-| **Milvus** | 中大型生产环境 | Docker / K8s | 功能完善，支持混合检索，性能强 |
-| **Pinecone** | 初创公司 / SaaS | 云服务，全托管 | 无运维成本，按用量计费 |
-| **Weaviate** | 需要知识图谱特性 | 云服务或自建 | 内置对象存储，GraphQL 查询 |
-| **pgvector** | 已有 PostgreSQL | 插件形式 | 无新增基础设施，适合数据量 <100 万 |
-
-**实战代码：Chroma 快速接入**
-
-```python
-import chromadb
-from chromadb.utils import embedding_functions
-
-# 使用 OpenAI Embedding（也可以替换为 BGE 等本地模型）
-openai_ef = embedding_functions.OpenAIEmbeddingFunction(
-    api_key="YOUR_API_KEY",
-    model_name="text-embedding-3-small"
-)
-
-client = chromadb.PersistentClient(path="./memory_db")
-collection = client.get_or_create_collection(
-    name="user_memory",
-    embedding_function=openai_ef
-)
-
-# 写入用户记忆
-def save_memory(user_id: str, content: str, metadata: dict):
-    collection.add(
-        documents=[content],
-        metadatas=[{"user_id": user_id, "timestamp": metadata.get("timestamp"), **metadata}],
-        ids=[f"{user_id}_{metadata.get('timestamp', '')}"]
-    )
-
-# 检索相关记忆（先过滤用户，再做语义匹配）
-def retrieve_memory(user_id: str, query: str, top_k: int = 5):
-    results = collection.query(
-        query_texts=[query],
-        n_results=top_k,
-        where={"user_id": user_id}  # 关键：用户隔离
-    )
-    return results["documents"][0]
-```
-
-> **踩坑记录**：Chroma 默认使用内存模式，重启后数据消失。生产环境务必用 `PersistentClient` 并指定持久化路径。另外，Embedding 函数一旦选定就别换，否则旧数据的向量和新查询向量会出现"维度不兼容"的报错。
-
-### 7.8.2 记忆数据的备份与恢复
-
-**常见问题场景：**
-
-向量数据库损坏或误删除，导致长期记忆数据丢失。用户反馈"Agent 怎么什么都不记得了"。
-
-**解决思路与方案：**
-
-长期记忆数据一旦丢失，等于用户画像和对话历史全部归零，是灾难性的。备份策略需要**双轨制**：
-
-```python
-import json
-import os
-from datetime import datetime
-
-class MemoryBackupManager:
-    """记忆数据的双轨备份：每日全量 + 实时增量"""
-    
-    def __init__(self, backup_dir: str = "./memory_backups"):
-        self.backup_dir = backup_dir
-        os.makedirs(backup_dir, exist_ok=True)
-    
-    def daily_full_backup(self, collection):
-        """每日全量备份：将所有向量数据导出为 JSON"""
-        today = datetime.now().strftime("%Y%m%d")
-        backup_path = os.path.join(self.backup_dir, f"full_backup_{today}.json")
-        
-        # 分批导出，避免一次性加载 OOM
-        all_data = []
-        offset = 0
-        batch_size = 1000
-        
-        while True:
-            result = collection.get(limit=batch_size, offset=offset)
-            if not result["ids"]:
-                break
-            all_data.extend(zip(
-                result["ids"],
-                result["documents"],
-                result["metadatas"]
-            ))
-            offset += batch_size
-        
-        with open(backup_path, "w", encoding="utf-8") as f:
-            json.dump(all_data, f, ensure_ascii=False)
-        
-        print(f"[备份] 全量备份完成，共 {len(all_data)} 条记录 -> {backup_path}")
-    
-    def restore_from_backup(self, backup_path: str, collection):
-        """从备份恢复数据"""
-        with open(backup_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        
-        # 批量写入，每次 500 条
-        batch_size = 500
-        for i in range(0, len(data), batch_size):
-            batch = data[i:i+batch_size]
-            ids, docs, metas = zip(*batch)
-            collection.add(
-                ids=list(ids),
-                documents=list(docs),
-                metadatas=list(metas)
-            )
-        print(f"[恢复] 从备份恢复 {len(data)} 条记录完成")
-
-```
-
-建议在 Crontab 或定时任务中每天凌晨执行一次 `daily_full_backup`，备份文件保留 30 天。
-
-### 7.8.3 记忆数据的生命周期管理
-
-**常见问题场景：**
-
-长期记忆数据持续增长，存储成本不断上升。大量低价值记忆（比如"你好""好的""嗯"）占用检索资源，还会干扰真正有价值的记忆召回。
-
-**解决思路与方案：**
-
-```python
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import List
+from enum import Enum
+from typing import Optional
 
-class MemoryLifecycleManager:
-    """记忆生命周期管理：价值评分 + 自动淘汰"""
-    
-    # 不同类型记忆的保留策略（天数，-1 表示永久）
-    RETENTION_POLICY = {
-        "user_preference": -1,   # 用户偏好：永久保留
-        "constraint_rule": -1,   # 行为约束：永久保留
-        "project_state": 180,    # 项目状态：180 天
-        "conversation_log": 30,  # 对话日志：30 天
-        "temp_context": 7,       # 临时上下文：7 天
-    }
-    
-    def __init__(self, collection):
-        self.collection = collection
-    
-    def score_memory_value(self, content: str, metadata: dict) -> float:
-        """
-        给记忆打"价值分"，低于阈值的候选淘汰
-        评估维度：长度、类型、最近访问频率
-        """
-        score = 0.0
-        
-        # 内容长度（太短的往往是无意义的）
-        if len(content) > 20:
-            score += 0.3
-        if len(content) > 100:
-            score += 0.2
-        
-        # 记忆类型权重
-        memory_type = metadata.get("type", "conversation_log")
-        type_weights = {
-            "user_preference": 1.0,
-            "constraint_rule": 1.0,
-            "project_state": 0.7,
-            "conversation_log": 0.3,
-            "temp_context": 0.1,
-        }
-        score += type_weights.get(memory_type, 0.3)
-        
-        # 访问频率加成
-        access_count = metadata.get("access_count", 0)
-        score += min(access_count * 0.05, 0.5)
-        
-        return min(score, 1.0)
-    
-    def cleanup_expired_memories(self):
-        """清理过期记忆"""
-        now = datetime.now()
-        deleted_count = 0
-        
-        for memory_type, days in self.RETENTION_POLICY.items():
-            if days == -1:
-                continue  # 永久保留，跳过
-            
-            cutoff_date = (now - timedelta(days=days)).isoformat()
-            
-            # 查找过期记录
-            expired = self.collection.get(
-                where={
-                    "$and": [
-                        {"type": {"$eq": memory_type}},
-                        {"created_at": {"$lt": cutoff_date}}
-                    ]
-                }
-            )
-            
-            if expired["ids"]:
-                self.collection.delete(ids=expired["ids"])
-                deleted_count += len(expired["ids"])
-                print(f"[生命周期] 清理 {memory_type} 类型过期记忆 {len(expired['ids'])} 条")
-        
-        return deleted_count
+class MemoryType(Enum):
+    PROCEDURAL = "procedural"  # 规则/约束 → YAML 文件
+    SEMANTIC = "semantic"      # 事实/画像 → SQLite
+    EPISODIC = "episodic"      # 事件/日志 → 向量数据库
 
+@dataclass
+class Memory:
+    id: str
+    type: MemoryType
+    content: str               # 结构化 JSON 字符串
+    embedding: Optional[list] = None
+    created_at: datetime = field(default_factory=datetime.now)
+    last_accessed: datetime = field(default_factory=datetime.now)
+    access_count: int = 0
+    weight: float = 1.0
+    deprecated: bool = False
+    deprecated_by: Optional[str] = None
+
+    def decay(self):
+        """简化版认知衰减"""
+        days = (datetime.now() - self.last_accessed).days
+        self.weight = 1.0 / (1 + days / 30)
+
+    def should_evict(self) -> bool:
+        if self.type == MemoryType.PROCEDURAL:
+            return False
+        if self.type == MemoryType.SEMANTIC:
+            return self.weight < 0.1
+        # EPISODIC: 30天后衰减到可淘汰
+        return (datetime.now() - self.created_at).days > 30 and self.weight < 0.3
 ```
 
-> **实战建议**：不要直接删除"低价值"记忆，先移到"归档集合"观察一周，确认没问题再永久删除。我们第一次上线这个功能时，差点把用户的重要设置项（它们的 content 很短）一起清掉了。
+> **一个忠告**：如果你在这个骨架上开始写第 101 行代码——"要不要加个 Redis 缓存层？要不要做个增量索引？"——停。回去看 7.5 节，选一个现成的框架。长期记忆的坑已经被 Mem0 和 Letta 填过了，你的价值在业务层，不在基础设施层。
+
+---
+
+## 7.9 小结
+
+长期记忆不是一个功能，是一个子系统。把它当做 RAG 的一个分支来对待，就注定了会在三个月后重写。三个最重要的建议：
+
+1. **分类存储，不要一把梭**：程序记忆进 Git，语义记忆进关系库，情景记忆进向量库。
+2. **Manage 是瓶颈，Write 和 Read 已经够好了**：把精力花在矛盾消解、记忆衰减、过期清理上。
+3. **用现成的**：Mem0、Letta、LangMem、Memobase 已经解决了 80% 的工程问题。剩下的 20% 是你的业务定制，不是重新发明向量检索。
+
+**本章完毕。**
