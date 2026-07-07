@@ -12,7 +12,7 @@
 
 Google 主导的开放协议，标准化不同 Agent 之间的能力发现、任务委托和结果传递。核心技术组件是 Agent Card——类似 `.well-known/agent.json`，让 Agent 通过网络声明自己的能力和接口。与 MCP 的分工：MCP 解决"模型↔工具"，A2A 解决"Agent↔Agent"。
 
-**相关术语**：MCP、ACP、Agent Card
+**相关术语**：MCP、ACP、ARD、Agent Card
 
 **首次定义章节**：第12章 生态工具
 
@@ -25,6 +25,18 @@ Google 主导的开放协议，标准化不同 Agent 之间的能力发现、任
 IBM 推出的企业级 Agent 通信标准，采用经典 REST + Webhook 架构。特色在于命名空间和会话 ID 体系，适合传统企业 IT 架构的运维和审计要求。2026 年 5 月迭代至 v0.3。
 
 **相关术语**：A2A、MCP
+
+**首次定义章节**：第12章 生态工具
+
+---
+
+### ARD（Agentic Resource Discovery）
+
+**中文**：Agent 资源发现协议
+
+Google + Microsoft + Hugging Face + GoDaddy 联合推动的开放协议，解决 Agent 如何自动发现可用资源的问题。核心机制：Well-Known URI 静态发布 AI Catalog 清单 → Registry 构建语义向量索引 → 编排 Agent 通过自然语言搜索发现资源 → 联邦搜索跨 Registry 联合查询。v0.9 于 2026 年 6 月发布。三层协议栈分工：ARD（发现层，回答"有什么可用"）→ A2A（协作层，回答"怎么委托任务"）→ MCP（执行层，回答"怎么调工具"）。
+
+**相关术语**：A2A、MCP、AI Catalog、Well-Known URI、URN
 
 **首次定义章节**：第12章 生态工具
 
@@ -53,6 +65,18 @@ Agent 运行的核心模式：收集上下文 → 规划行动 → 执行工具 
 **相关术语**：Agent、ReAct、Harness
 
 **首次定义章节**：第13章 Harness 与 Loop 工程化
+
+---
+
+### AI Catalog（AI 资源目录）
+
+**中文**：AI 资源目录
+
+ARD 协议定义的标准资源清单格式。每个提供者在自己的域名下通过 Well-Known URI（`/.well-known/ai-catalog.json`）发布，列出该域下所有可被 Agent 发现的资源。条目包含：URN 标识符、资源类型、访问 URL、能力描述、代表性查询示例（用于语义搜索的种子向量）。支持四种发现入口：DNS SVCB 记录、Well-Known URI、robots.txt Agentmap 指令、HTML `<link>` 标签。
+
+**相关术语**：ARD、Well-Known URI、URN、A2A
+
+**首次定义章节**：第12章 生态工具
 
 ---
 
@@ -346,6 +370,18 @@ LLM 处理文本的最小单位。直接影响 API 调用成本和上下文窗�
 
 ---
 
+### URN（Uniform Resource Name）
+
+**中文**：统一资源名称
+
+ARD 协议定义的 Agent 资源全局唯一标识符。格式：`urn:air:<publisher>:<namespace>:<agent-name>`。核心设计意图：逻辑身份与物理位置解耦——Agent 迁移域名不影响 URN 标识；FQDN 作为组织信任锚点——域名所有权天然验证归属；联邦合并无碰撞——不同组织的同名 Agent 自动区分。示例：`urn:air:salesforce.com:crm:lead-enrichment`。
+
+**相关术语**：ARD、AI Catalog、Well-Known URI
+
+**首次定义章节**：第12章 生态工具
+
+---
+
 ### Vector（向量）
 
 **中文**：向量 / 嵌入向量
@@ -358,6 +394,18 @@ LLM 处理文本的最小单位。直接影响 API 调用成本和上下文窗�
 
 ---
 
+### Well-Known URI（公认统一资源标识符）
+
+**中文**：公认 URI / 知名 URI
+
+Web 基础设施标准（RFC 8615），在域名的 `/.well-known/` 路径下发布站点级元数据的约定。ARD 协议利用此机制——每个 Agent 提供者在 `https://{domain}/.well-known/ai-catalog.json` 发布资源清单，使 Registry 能通过域名自动发现资源。不需要中心化注册中心，分布式的域名体系本身就是发现基础设施。
+
+**相关术语**：ARD、AI Catalog、URN
+
+**首次定义章节**：第12章 生态工具
+
+---
+
 ## A.2 术语中英文使用规范
 
 | 英文 | 首次出现 | 后续使用 |
@@ -365,6 +413,9 @@ LLM 处理文本的最小单位。直接影响 API 调用成本和上下文窗�
 | Agent | Agent（智能代理） | Agent |
 | MCP | MCP（模型上下文协议） | MCP |
 | A2A | A2A（Agent 间通信协议） | A2A |
+| ARD | ARD（Agent 资源发现协议） | ARD |
+| AI Catalog | AI Catalog（AI 资源目录） | AI Catalog |
+| URN | URN（统一资源名称） | URN |
 | RAG | RAG（检索增强生成） | RAG |
 | ReAct | ReAct（推理-行动） | ReAct |
 | Embedding | Embedding（嵌入向量） | Embedding |
@@ -379,7 +430,7 @@ LLM 处理文本的最小单位。直接影响 API 调用成本和上下文窗�
 
 ### 按字母
 
-A: Agent, Agentic Loop, A2A, ACP, API
+A: Agent, Agentic Loop, A2A, ACP, AI Catalog, API, ARD
 C: Chain-of-Thought, Chunk, Context, Context Engineering
 D: Durable Execution
 E: Embedding
@@ -391,7 +442,9 @@ P: Pipeline, Planner, Prompt, Prompt Caching
 R: RAG, ReAct, Reasoning Model, Reflexion
 S: SKILL.md, Structured Output, SubAgent
 T: Token
+U: URN
 V: Vector
+W: Well-Known URI
 
 ### 按章节
 
@@ -408,5 +461,5 @@ V: Vector
 | 09 规划与推理 | Chain-of-Thought, Planner, ReAct, Reasoning Model, Reflexion |
 | 10 多智能体治理 | SubAgent |
 | 11 流程编排 | Durable Execution, Pipeline |
-| 12 生态工具 | A2A, ACP, MCP |
+| 12 生态工具 | A2A, ACP, ARD, AI Catalog, URN, Well-Known URI, MCP |
 | 16 Harness 与 Loop | Agentic Loop, Harness / Scaffolding |

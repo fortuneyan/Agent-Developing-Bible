@@ -102,31 +102,19 @@ Shared State
 
 ---
 
-## 10.5 MCP + A2A 协议生态
+## 10.5 协议层：多智能体的通信基础设施
 
-2026 年，Multi-Agent 的互操作性正在标准化。两个核心协议已形成分工：
+多 Agent 系统的互操作性依赖三层协议栈。
 
-```
-应用层
-  ↓
-A2A (Agent-to-Agent)——水平协调：跨框架 Agent 互操作
-  ↓
-MCP (Model Context Protocol)——垂直集成：Agent 调用工具/数据
-  ↓
-外部 API / 数据库 / 文件
-```
+**ARD**（v0.9，2026.06）：发现层——解决"有哪些 Agent 可用、在哪、可信吗"。通过 Well-Known URI 发布资源清单，Registry 做语义搜索和联邦发现。详见第十二章补充文件 `12_Agent开发指南_ARD协议发现层.md`。
 
-**MCP**（97M+ 下载）：
-- 将 N×M 笛卡尔积简化为 N+M 连接——每个 Agent 不需要单独对接每个工具
-- JSON-RPC 2.0（stdio 或 HTTP+SSE）
-- 核心原语：Tools / Resources / Prompts / Sampling
+**A2A**（v1.0，2026.03，Linux Foundation 治理）：协作层——解决"Agent A 怎么委托任务给 Agent B"。核心机制：Agent Card（能力发现）、Task（8 状态生命周期）、Artifact（Part 内容模型）、三种交付机制（轮询/流式/推送）。深度解析见本章补充文件 `10_Agent开发指南_A2A协议深度解析.md`。
 
-**A2A**（Linux Foundation 治理，150+ 合作伙伴，v1.0 于 2026.03 发布）：
-- 6 个任务状态：submitted → working → completed/failed/cancelled
-- SSE 流式传输
-- 让 LangGraph 的 Agent 能调用 CrewAI 的 Agent
+**MCP**（97M+ 月下载）：执行层——解决"Agent 怎么调工具/访问数据"。JSON-RPC 2.0，核心原语 Tools / Resources / Prompts / Sampling。
 
-**选框架时的协议检查清单**：支持 MCP 吗？支持 A2A 吗？如果不支持——你未来会为"供应商锁定"付出代价。
+三层分工：ARD 回答"有什么"，A2A 回答"怎么合作"，MCP 回答"怎么做"。选框架时三个都问。
+
+**协议检查清单**：支持 MCP 吗？支持 A2A 吗？支持 ARD 吗？A2A 支持哪些认证方式？流式？推送？Agent Card 可定制？——如果三个协议都不支持，你未来会为"供应商锁定"付出代价。
 
 ---
 

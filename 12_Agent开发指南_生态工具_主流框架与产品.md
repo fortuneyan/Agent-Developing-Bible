@@ -70,17 +70,40 @@ LangChain 依然是生态最大的集成框架（700+ 工具集成），但它�
 
 **Dify vs Coze**：开源自托管 vs 闭源云服务。需要数据控制和深度定制选 Dify，需要国内生态无缝集成和零运维选 Coze。
 
-## 12.6 MCP + A2A 协议栈
+## 12.6 MCP + A2A + ARD：协议栈三剑客
 
-2026 年 Agent 生态最重要的基础设施不是任何框架，而是两个协议。
+2026 年 Agent 生态最重要的基础设施不是任何框架，而是三层协议——它们已经形成了清晰的分工：
 
-**MCP（Model Context Protocol）**：定义 Agent 如何发现和调用外部工具/服务。Anthropic 创建，2025 年 12 月移交 Linux Foundation 旗下 Agentic AI Foundation。核心概念：MCP Server 暴露工具（Resources/Tools/Prompts），MCP Client（Agent）通过标准协议调用。2026 年 4 月数据：月下载 9700 万次，17,468 个公开 Server。
+```
+┌─────────────────────────────────────┐
+│           ARD（发现层）               │
+│  Well-Known URI · AI Catalog · URN  │
+│  Registry · 联邦搜索 · Trust Manifest │
+│  "有什么可用？谁提供的？可信吗？"       │
+├─────────────────────────────────────┤
+│           A2A（协作层）               │
+│  Agent Card · Task · Artifact · SSE │
+│  "Agent 之间怎么委托任务？"           │
+├─────────────────────────────────────┤
+│           MCP（执行层）               │
+│  Tools · Resources · Prompts        │
+│  "怎么调用具体工具和资源？"           │
+└─────────────────────────────────────┘
+```
 
-**A2A（Agent-to-Agent）**：Google 主导，定义 Agent 之间如何发现和委托任务。解决的是"Agent A 怎么找到 Agent B 并说'你帮我做这个'"的问题。150+ 组织采用，预置合作伙伴包括 Salesforce、Workday、ServiceNow。
+### 12.6.1 MCP（执行层）
 
-**MCP 和 A2A 的关系**：MCP 回答"如何使用这个服务"（垂直集成），A2A 回答"Agent 如何找到并委托给彼此"（水平协作）。两个协议互补，不重叠。
+Anthropic 创建，2025 年 12 月移交 Linux Foundation 旗下 Agentic AI Foundation。核心概念：MCP Server 暴露工具（Resources/Tools/Prompts），MCP Client（Agent）通过标准协议调用。2026 年 4 月数据：月下载 9700 万次，17,468 个公开 Server。
 
-**对你的影响**：2026 年选框架 = 选协议生态。如果你的工具链已经基于 MCP，那 Anthropic SDK 或 LangGraph（通过适配器）的集成最顺滑。如果你需要跨组织 Agent 协作，Google ADK 的 A2A 支持最成熟。**核心原则**：围绕协议构建，而非围绕框架构建——协议的生命周期远长于框架。
+### 12.6.2 A2A（协作层）
+
+Google 主导，v1.0 于 2026.03 发布。解决 Agent 间的能力发现和任务委托。150+ 组织采用，预置合作伙伴包括 Salesforce、Workday、ServiceNow。A2A 的深度工程解析（Agent Card 结构、Task 生命周期、多轮交互模式）见第十章补充文件 `10_Agent开发指南_A2A协议深度解析.md`。
+
+### 12.6.3 ARD（发现层）
+
+Google + Microsoft + Hugging Face + GoDaddy 联合推动，v0.9 于 2026.06 发布——本书截稿时最新鲜的 Agent 协议。解决的是"编排 Agent 怎么自动发现有哪些资源可用"。核心机制：Well-Known URI 静态发布资源清单、Registry 语义搜索、URN 全局标识、Trust Manifest 信任评估。完整解析见本章补充文件 `12_Agent开发指南_ARD协议发现层.md`。
+
+**对你的影响**：2026 年选框架 = 选协议生态。核心原则不变：**围绕协议构建，而非围绕框架构建**——协议的生命周期远长于框架。只是现在你要检查的不是两个协议，是三个。
 
 ## 12.7 选型决策
 
